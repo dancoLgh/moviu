@@ -1,4 +1,5 @@
 import { CapacityCalendar } from '@/components/calendar/CapacityCalendar';
+import { Button, Card, CardBody, CardHeader, Divider } from '@heroui/react';
 
 const demoOccurrences = [
   {
@@ -24,21 +25,23 @@ const demoOccurrences = [
 export default function CalendarPage() {
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-semibold">Agenda semanal</h2>
-          <p className="text-sm text-slate-400">
-            Visualiza la ocupación por clase con control de cupos y cancelaciones.
-          </p>
-        </div>
-        <a
-          href="/app/api/suggest-slots"
-          className="rounded-md border border-brand/40 px-3 py-1.5 text-sm text-brand hover:bg-brand/10"
-        >
-          Sugerir recuperos
-        </a>
-      </div>
-      <CapacityCalendar occurrences={demoOccurrences} />
+      <Card radius="lg" shadow="sm" className="border border-divider bg-content1">
+        <CardHeader className="flex flex-col gap-3 px-4 pt-4 sm:flex-row sm:items-start sm:justify-between sm:px-6">
+          <div className="flex flex-col gap-1">
+            <h2 className="text-xl font-semibold">Agenda semanal</h2>
+            <p className="text-sm text-foreground/60">
+              Visualiza cupos, buffers y cancelaciones para coordinar clases y recuperos.
+            </p>
+          </div>
+          <Button as="a" href="/app/api/suggest-slots" color="primary" variant="flat" size="sm">
+            Sugerir recuperos
+          </Button>
+        </CardHeader>
+        <Divider />
+        <CardBody className="px-4 py-4 sm:px-6">
+          <CapacityCalendar occurrences={demoOccurrences} />
+        </CardBody>
+      </Card>
     </div>
   );
 }

@@ -1,15 +1,21 @@
+import { Button, Card, CardBody, CardHeader, Input } from '@heroui/react';
+
 export default function SignUpPage() {
   return (
-    <div className="mx-auto mt-20 max-w-sm rounded-xl border border-slate-800 bg-slate-900/60 p-6 text-center">
-      <h1 className="text-lg font-semibold text-slate-100">Crear cuenta de estudio</h1>
-      <p className="mt-2 text-sm text-slate-400">Configura tu tenant y comienza a agendar.</p>
-      <form className="mt-6 space-y-3">
-        <input type="text" placeholder="Nombre del estudio" className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2" />
-        <input type="email" placeholder="Email" className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2" />
-        <button type="submit" className="w-full rounded-md bg-brand px-4 py-2 text-sm font-semibold text-brand-foreground">
-          Crear tenant
-        </button>
-      </form>
+    <div className="flex min-h-[70vh] items-center justify-center px-4 py-10">
+      <Card as="form" radius="lg" shadow="sm" className="w-full max-w-sm border border-divider bg-content1">
+        <CardHeader className="flex flex-col gap-2 px-6 pt-6 text-center">
+          <h1 className="text-xl font-semibold">Crear cuenta de estudio</h1>
+          <p className="text-sm text-foreground/60">Configura tu tenant y comienza a agendar en minutos.</p>
+        </CardHeader>
+        <CardBody className="gap-4 px-6 pb-6">
+          <Input label="Nombre del estudio" placeholder="Elementos Pilates" variant="bordered" isRequired />
+          <Input type="email" label="Email" placeholder="contacto@estudio.test" variant="bordered" isRequired />
+          <Button color="primary" type="submit" className="w-full">
+            Crear tenant
+          </Button>
+        </CardBody>
+      </Card>
     </div>
   );
 }

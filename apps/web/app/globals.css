@@ -6,10 +6,12 @@
   color-scheme: light dark;
 }
 
-body {
-  @apply bg-slate-950 text-slate-50 dark:bg-slate-950 dark:text-slate-50;
-}
+@layer base {
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
 
-a {
-  @apply text-brand;
+  a {
+    @apply text-brand;
+  }
 }

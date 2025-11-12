@@ -1,18 +1,20 @@
+import { Button, Card, CardBody, CardHeader, Input } from '@heroui/react';
+
 export default function SignInPage() {
   return (
-    <div className="mx-auto mt-20 max-w-sm rounded-xl border border-slate-800 bg-slate-900/60 p-6 text-center">
-      <h1 className="text-lg font-semibold text-slate-100">Ingresa a moviu</h1>
-      <p className="mt-2 text-sm text-slate-400">Te enviaremos un enlace seguro al email registrado.</p>
-      <form className="mt-6 space-y-3">
-        <input
-          type="email"
-          placeholder="tu@email.com"
-          className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2"
-        />
-        <button type="submit" className="w-full rounded-md bg-brand px-4 py-2 text-sm font-semibold text-brand-foreground">
-          Enviar enlace
-        </button>
-      </form>
+    <div className="flex min-h-[70vh] items-center justify-center px-4 py-10">
+      <Card as="form" radius="lg" shadow="sm" className="w-full max-w-sm border border-divider bg-content1">
+        <CardHeader className="flex flex-col gap-2 px-6 pt-6 text-center">
+          <h1 className="text-xl font-semibold">Ingresa a moviu</h1>
+          <p className="text-sm text-foreground/60">Recibirás un enlace seguro en tu correo registrado.</p>
+        </CardHeader>
+        <CardBody className="gap-4 px-6 pb-6">
+          <Input type="email" label="Email" placeholder="tu@email.com" variant="bordered" isRequired />
+          <Button color="primary" type="submit" className="w-full">
+            Enviar enlace
+          </Button>
+        </CardBody>
+      </Card>
     </div>
   );
 }

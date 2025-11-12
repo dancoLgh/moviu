@@ -1,45 +1,53 @@
+import { Button, Card, CardBody, CardHeader, Divider, Input, Select, SelectItem } from '@heroui/react';
+
 export default function SettingsPage() {
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-xl font-semibold">Configuración del estudio</h2>
-        <p className="text-sm text-slate-400">
-          Ajusta datos del tenant, zona horaria, notificaciones y políticas de cancelación.
+      <header className="flex flex-col gap-2">
+        <h2 className="text-2xl font-semibold">Configuración del estudio</h2>
+        <p className="text-sm text-foreground/60">
+          Actualiza datos generales, zona horaria por defecto e idiomas disponibles para el portal.
         </p>
-      </div>
-      <form className="space-y-4 rounded-lg border border-slate-800 bg-slate-900/50 p-6">
-        <div className="grid gap-4 md:grid-cols-2">
-          <label className="flex flex-col gap-2 text-sm">
-            Nombre del estudio
-            <input
+      </header>
+      <Card as="form" radius="lg" shadow="sm" className="border border-divider bg-content1">
+        <CardHeader className="px-4 pt-4 sm:px-6">
+          <h3 className="text-base font-semibold">Datos principales</h3>
+        </CardHeader>
+        <Divider />
+        <CardBody className="flex flex-col gap-4 px-4 py-6 sm:px-6">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Input
+              label="Nombre del estudio"
               defaultValue="Elementos Pilates & Kine"
-              className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2"
+              variant="bordered"
             />
-          </label>
-          <label className="flex flex-col gap-2 text-sm">
-            Email de facturación
-            <input defaultValue="billing@elementos.test" className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2" />
-          </label>
-        </div>
-        <div className="grid gap-4 md:grid-cols-2">
-          <label className="flex flex-col gap-2 text-sm">
-            Zona horaria
-            <select className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2">
-              <option value="America/Asuncion">America/Asuncion</option>
-            </select>
-          </label>
-          <label className="flex flex-col gap-2 text-sm">
-            Idioma
-            <select className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2">
-              <option value="es-PY">Español (PY)</option>
-              <option value="en-US">English</option>
-            </select>
-          </label>
-        </div>
-        <button type="submit" className="rounded-md bg-brand px-4 py-2 text-sm font-semibold text-brand-foreground">
-          Guardar cambios
-        </button>
-      </form>
+            <Input label="Email de facturación" defaultValue="billing@elementos.test" variant="bordered" />
+          </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Select label="Zona horaria" variant="bordered" defaultSelectedKeys={['America/Asuncion']}>
+              <SelectItem key="America/Asuncion">America/Asuncion</SelectItem>
+              <SelectItem key="America/Buenos_Aires">America/Buenos_Aires</SelectItem>
+            </Select>
+            <Select label="Idioma" variant="bordered" defaultSelectedKeys={['es-PY']}>
+              <SelectItem key="es-PY">Español (PY)</SelectItem>
+              <SelectItem key="en-US">English</SelectItem>
+            </Select>
+          </div>
+          <div className="flex flex-col gap-2 text-xs text-foreground/60">
+            <p>
+              Las actualizaciones se propagan automáticamente a las políticas RLS y a las notificaciones del portal.
+            </p>
+            <p>
+              Los cambios de idioma aplican a nuevos usuarios; los existentes pueden elegir su preferencia en el portal.
+            </p>
+          </div>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+            <Button color="primary" type="submit" className="w-full sm:w-auto">
+              Guardar cambios
+            </Button>
+          </div>
+        </CardBody>
+      </Card>
     </div>
   );
 }

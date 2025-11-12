@@ -1,8 +1,20 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { addDays, format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
+import {
+  Button,
+  Card,
+  CardBody,
+  CardFooter,
+  CardHeader,
+  Chip,
+  Divider,
+  Input,
+  Select,
+  SelectItem
+} from '@heroui/react';
 
 const weekdays = [
   { value: 1, label: 'Lunes' },
@@ -34,6 +46,8 @@ export function PlanWizard() {
     setState((prev) => ({ ...prev, startDate: format(today, 'yyyy-MM-dd') }));
   }, []);
 
+  const baseWeekdayKey = useMemo(() => new Set([String(state.baseWeekday)]), [state.baseWeekday]);
+
   function toggleDuplicate(day: number) {
     setState((prev) => {
       const exists = prev.duplicates.includes(day);
@@ -48,100 +62,124 @@ export function PlanWizard() {
     if (!state.startDate) return;
     const origin = parseISO(state.startDate);
     const slots: string[] = [];
-    const selectedDays = [state.baseWeekday, ...state.duplicates].sort();
+    const selectedDays = [state.baseWeekday, ...state.duplicates]
+      .filter((value, index, array) => array.indexOf(value) === index)
+      .sort();
+
     for (let i = 0; i < 4; i += 1) {
       selectedDays.forEach((weekday) => {
         const current = addDays(origin, ((weekday + 7 - origin.getDay()) % 7) + i * 7);
-        slots.push(`${format(current, "EEEE d MMMM", { locale: es })} · ${state.hour}`);
+        slots.push(`${format(current, "EEEE d 'de' MMMM", { locale: es })} · ${state.hour}`);
       });
     }
     setPreview(slots);
   }
 
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-6">
-      <h3 className="text-lg font-semibold text-slate-100">Plan recurrente con duplicar días</h3>
-      <p className="mt-1 text-sm text-slate-400">
-        Selecciona el día base y duplica rápidamente el horario a otros días disponibles.
-      </p>
-      <div className="mt-6 grid gap-4 md:grid-cols-3">
-        <label className="flex flex-col gap-2 text-sm">
-          Día base
-          <select
-            className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2"
-            value={state.baseWeekday}
-            onChange={(event) => setState((prev) => ({ ...prev, baseWeekday: Number(event.target.value) }))}
+    <Card radius="lg" shadow="sm" className="border border-divider bg-content1">
+      <CardHeader className="flex flex-col gap-1 px-4 pt-4 sm:px-6">
+        <h3 className="text-lg font-semibold">Plan recurrente con duplicar días</h3>
+        <p className="text-sm text-foreground/70">
+          Define el día base, horarios y días duplicados antes de generar la agenda recurrente.
+        </p>
+      </CardHeader>
+      <Divider />
+      <CardBody className="flex flex-col gap-5 px-4 py-6 sm:px-6">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <Select
+            label="Día base"
+            variant="bordered"
+            size="sm"
+            selectedKeys={baseWeekdayKey}
+            onSelectionChange={(selection) => {
+              if (selection === 'all') return;
+              const [value] = Array.from(selection);
+              if (!value) return;
+              const numeric = Number(value);
+              setState((prev) => ({
+                ...prev,
+                baseWeekday: numeric,
+                duplicates: prev.duplicates.filter((day) => day !== numeric)
+              }));
+            }}
           >
             {weekdays.map((day) => (
-              <option key={day.value} value={day.value}>
+              <SelectItem key={day.value} textValue={day.label}>
                 {day.label}
-              </option>
+              </SelectItem>
             ))}
-          </select>
-        </label>
-        <label className="flex flex-col gap-2 text-sm">
-          Hora
-          <input
+          </Select>
+          <Input
             type="time"
+            label="Hora"
+            size="sm"
+            variant="bordered"
             value={state.hour}
             onChange={(event) => setState((prev) => ({ ...prev, hour: event.target.value }))}
-            className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2"
           />
-        </label>
-        <label className="flex flex-col gap-2 text-sm">
-          Fecha de inicio
-          <input
+          <Input
             type="date"
+            label="Fecha de inicio"
+            size="sm"
+            variant="bordered"
             value={state.startDate}
             onChange={(event) => setState((prev) => ({ ...prev, startDate: event.target.value }))}
-            className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2"
           />
-        </label>
-      </div>
-      <div className="mt-6 rounded-lg border border-slate-800 bg-slate-950/60 p-4">
-        <p className="text-sm font-medium text-slate-200">Duplicar a</p>
-        <div className="mt-3 flex flex-wrap gap-2">
-          {weekdays
-            .filter((day) => day.value !== state.baseWeekday)
-            .map((day) => {
-              const active = state.duplicates.includes(day.value);
-              return (
-                <button
-                  key={day.value}
-                  type="button"
-                  onClick={() => toggleDuplicate(day.value)}
-                  className={`rounded-full border px-4 py-1 text-xs font-medium transition ${
-                    active ? 'border-brand bg-brand/20 text-brand' : 'border-slate-700 text-slate-300 hover:border-brand'
-                  }`}
-                >
-                  {day.label}
-                </button>
-              );
-            })}
         </div>
-      </div>
-      <div className="mt-6 flex items-center justify-between">
-        <button
-          type="button"
-          onClick={buildPreview}
-          className="rounded-md bg-brand px-4 py-2 text-sm font-semibold text-brand-foreground"
-        >
+        <div className="flex flex-col gap-3">
+          <p className="text-sm font-medium">Duplicar horario a</p>
+          <div className="flex flex-wrap gap-2">
+            {weekdays
+              .filter((day) => day.value !== state.baseWeekday)
+              .map((day) => {
+                const active = state.duplicates.includes(day.value);
+                return (
+                  <Chip
+                    key={day.value}
+                    variant={active ? 'solid' : 'bordered'}
+                    color={active ? 'primary' : 'default'}
+                    radius="full"
+                    onPress={() => toggleDuplicate(day.value)}
+                  >
+                    {day.label}
+                  </Chip>
+                );
+              })}
+          </div>
+        </div>
+        <Card className="bg-content2/60" radius="lg" shadow="none">
+          <CardBody className="gap-2 text-xs text-foreground/70">
+            <p className="font-medium text-sm text-foreground">Detalles operativos</p>
+            <p>Los duplicados respetan buffers configurados en el servicio y validan cupo antes de confirmarse.</p>
+            <p>El asistente puede ajustar manualmente conflictos de sala o profesional durante la revisión.</p>
+          </CardBody>
+        </Card>
+      </CardBody>
+      <Divider />
+      <CardFooter className="flex flex-col gap-4 px-4 pb-4 pt-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+        <Button color="primary" radius="md" onPress={buildPreview} className="w-full sm:w-auto">
           Generar ocurrencias
-        </button>
-        <p className="text-xs text-slate-500">
-          Duplicar día respeta buffers y capacidad durante la generación de ocurrencias.
+        </Button>
+        <p className="text-xs text-foreground/60">
+          Genera un borrador de cuatro semanas para confirmar antes de publicar en la agenda.
         </p>
-      </div>
+      </CardFooter>
       {preview.length > 0 && (
-        <div className="mt-6 space-y-2 rounded-lg border border-emerald-700/40 bg-emerald-500/10 p-4 text-sm text-emerald-200">
-          <p className="font-medium">Ocurrencias sugeridas</p>
-          <ul className="list-disc pl-4">
-            {preview.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-        </div>
+        <>
+          <Divider />
+          <CardBody className="px-4 pb-6 pt-4 sm:px-6">
+            <p className="text-sm font-semibold">Ocurrencias sugeridas</p>
+            <ul className="mt-3 space-y-2 text-sm text-foreground/80">
+              {preview.map((item) => (
+                <li key={item} className="flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-primary" aria-hidden />
+                  {item}
+                </li>
+              ))}
+            </ul>
+          </CardBody>
+        </>
       )}
-    </div>
+    </Card>
   );
 }

@@ -1,3 +1,5 @@
+import { Card, CardBody, CardHeader, Chip, Divider } from '@heroui/react';
+
 const services = [
   {
     name: 'Pilates grupal',
@@ -25,23 +27,38 @@ const services = [
 export default function ServicesPage() {
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-xl font-semibold">Servicios</h2>
-        <p className="text-sm text-slate-400">Define duración, buffers, políticas de cancelación y cupos.</p>
-      </div>
-      <div className="grid gap-4 md:grid-cols-3">
+      <header className="flex flex-col gap-2">
+        <h2 className="text-2xl font-semibold">Servicios</h2>
+        <p className="text-sm text-foreground/60">
+          Define duración, buffers, políticas de cancelación y cupos disponibles para cada servicio.
+        </p>
+      </header>
+      <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
         {services.map((service) => (
-          <div key={service.name} className="rounded-lg border border-slate-800 bg-slate-900/50 p-4">
-            <h3 className="text-sm font-semibold text-slate-100">{service.name}</h3>
-            <dl className="mt-2 space-y-1 text-xs text-slate-400">
-              <div className="flex justify-between"><dt>Duración</dt><dd>{service.duration}</dd></div>
-              <div className="flex justify-between"><dt>Cupo</dt><dd>{service.capacity}</dd></div>
-              <div className="flex justify-between"><dt>Precio base</dt><dd>{service.price}</dd></div>
-            </dl>
-            <p className="mt-2 text-xs text-slate-500">{service.notes}</p>
-          </div>
+          <Card key={service.name} radius="lg" shadow="sm" className="border border-divider bg-content1">
+            <CardHeader className="flex flex-col gap-3 px-4 pt-4 sm:px-6">
+              <div className="flex items-start justify-between">
+                <h3 className="text-lg font-semibold">{service.name}</h3>
+                <Chip size="sm" color="primary" variant="flat">
+                  {service.capacity} cupo{service.capacity === 1 ? '' : 's'}
+                </Chip>
+              </div>
+              <p className="text-xs text-foreground/60">{service.notes}</p>
+            </CardHeader>
+            <Divider />
+            <CardBody className="gap-2 px-4 py-5 text-sm text-foreground/70 sm:px-6">
+              <div className="flex items-center justify-between text-xs uppercase tracking-wide text-foreground/50">
+                <span>Duración</span>
+                <span className="text-foreground">{service.duration}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs uppercase tracking-wide text-foreground/50">
+                <span>Precio base</span>
+                <span className="text-foreground">{service.price}</span>
+              </div>
+            </CardBody>
+          </Card>
         ))}
-      </div>
+      </section>
     </div>
   );
 }
