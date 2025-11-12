@@ -1,11 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  experimental: {
-    cacheComponents: true
-  },
+  cacheComponents: true,
   outputFileTracingIncludes: {
-    "**/*": ["supabase/**"]
-  }
+    "**/*": ["supabase/**"],
+  },
 };
 
 export default nextConfig;
