@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { addDays, format } from 'date-fns';
+import { useEffect, useState } from 'react';
+import { addDays, format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 
 const weekdays = [
@@ -14,7 +14,7 @@ const weekdays = [
 ];
 
 type WizardState = {
-  startDate: Date;
+  startDate: string;
   baseWeekday: number;
   hour: string;
   duplicates: number[];
@@ -22,12 +22,17 @@ type WizardState = {
 
 export function PlanWizard() {
   const [state, setState] = useState<WizardState>({
-    startDate: new Date(),
+    startDate: '',
     baseWeekday: 1,
     hour: '15:00',
     duplicates: []
   });
   const [preview, setPreview] = useState<string[]>([]);
+
+  useEffect(() => {
+    const today = new Date();
+    setState((prev) => ({ ...prev, startDate: format(today, 'yyyy-MM-dd') }));
+  }, []);
 
   function toggleDuplicate(day: number) {
     setState((prev) => {
@@ -40,11 +45,13 @@ export function PlanWizard() {
   }
 
   function buildPreview() {
+    if (!state.startDate) return;
+    const origin = parseISO(state.startDate);
     const slots: string[] = [];
     const selectedDays = [state.baseWeekday, ...state.duplicates].sort();
     for (let i = 0; i < 4; i += 1) {
       selectedDays.forEach((weekday) => {
-        const current = addDays(state.startDate, ((weekday + 7 - state.startDate.getDay()) % 7) + i * 7);
+        const current = addDays(origin, ((weekday + 7 - origin.getDay()) % 7) + i * 7);
         slots.push(`${format(current, "EEEE d MMMM", { locale: es })} · ${state.hour}`);
       });
     }
@@ -85,8 +92,8 @@ export function PlanWizard() {
           Fecha de inicio
           <input
             type="date"
-            value={format(state.startDate, 'yyyy-MM-dd')}
-            onChange={(event) => setState((prev) => ({ ...prev, startDate: new Date(event.target.value) }))}
+            value={state.startDate}
+            onChange={(event) => setState((prev) => ({ ...prev, startDate: event.target.value }))}
             className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2"
           />
         </label>
