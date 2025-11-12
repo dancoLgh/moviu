@@ -3,7 +3,7 @@
 import { useMemo } from 'react';
 import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { Card, CardBody, Chip, Progress } from '@heroui/react';
+import { Card, CardBody, Chip, Progress, ScrollShadow } from '@heroui/react';
 
 type Occurrence = {
   id: string;
@@ -42,7 +42,7 @@ export function CapacityCalendar({ occurrences }: Props) {
   }
 
   return (
-    <div className="space-y-3">
+    <ScrollShadow hideScrollBar className="flex max-h-[420px] flex-col gap-3">
       {items.map((item) => {
         const isFull = item.booked >= item.capacity;
         const statusLabel =
@@ -80,6 +80,6 @@ export function CapacityCalendar({ occurrences }: Props) {
           </Card>
         );
       })}
-    </div>
+    </ScrollShadow>
   );
 }

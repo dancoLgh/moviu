@@ -21,6 +21,8 @@ pnpm --filter web install
 pnpm dev
 ```
 
+La interfaz está construida con Next.js 16, Tailwind 3 y [HeroUI](https://www.heroui.com/docs/guide) siguiendo un enfoque mobile-first.
+
 ## Base de datos
 
 ```bash
