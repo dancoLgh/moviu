@@ -1,0 +1,17 @@
+{
+  "name": "Moviu Studio",
+  "short_name": "Moviu",
+  "description": "PWA para gestionar un estudio de Pilates y Kinesiología",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#7c3aed",
+  "icons": [
+    {
+      "src": "/icons/moviu-icon.svg",
+      "sizes": "128x128",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

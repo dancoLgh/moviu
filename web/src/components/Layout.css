@@ -1,0 +1,80 @@
+.app-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.app-shell__header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.5rem 1rem 0;
+}
+
+.app-shell__eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  font-size: 0.75rem;
+  margin-bottom: 0.35rem;
+  color: var(--text-muted);
+}
+
+.app-shell__cta-group {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.app-shell__body {
+  display: grid;
+  grid-template-columns: minmax(200px, 240px) 1fr;
+  gap: 1rem;
+  padding: 0 1rem 2rem;
+}
+
+.app-shell__nav {
+  position: sticky;
+  top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1rem;
+  border: 1px solid var(--surface-border);
+  border-radius: 1rem;
+  background: var(--surface);
+}
+
+.app-shell__nav a {
+  padding: 0.65rem 0.75rem;
+  border-radius: 0.75rem;
+  text-decoration: none;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.app-shell__nav a.active {
+  color: var(--text-primary);
+  background: var(--gradient);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.3);
+}
+
+.app-shell__content {
+  border-radius: 1.5rem;
+  background: var(--surface);
+  padding: 1.5rem;
+  box-shadow: var(--elevation);
+  min-height: 60vh;
+}
+
+@media (max-width: 920px) {
+  .app-shell__body {
+    grid-template-columns: 1fr;
+  }
+
+  .app-shell__nav {
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+}
