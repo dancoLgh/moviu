@@ -46,7 +46,7 @@ class PrintProcessor:
 
     def _build_payload(self, job: PrintJob) -> bytes:
         if job.mode == "raw":
-            return ensure_bytes(job.content)
+            return self._decode_raw(job.content)
         if job.mode == "image":
             image = self._decode_image(job.content)
         elif job.mode == "html":
@@ -54,6 +54,22 @@ class PrintProcessor:
         else:
             raise PrinterError(f"Modo no soportado: {job.mode}")
         return image_to_escpos(image)
+
+    @staticmethod
+    def _decode_raw(content: str) -> bytes:
+        """Decode transport-friendly strings (hex/base64) into bytes."""
+
+        data = content.strip()
+        try:
+            return bytes.fromhex(data)
+        except ValueError:
+            pass
+        try:
+            return base64.b64decode(data)
+        except Exception as exc:  # noqa: BLE001
+            raise PrinterError(
+                "El contenido raw debe ser una cadena hexadecimal o base64"
+            ) from exc
 
     @staticmethod
     def _decode_image(data: str) -> Image.Image:

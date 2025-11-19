@@ -46,7 +46,7 @@ Ejemplo de payload para HTML:
 }
 ```
 
-Ejemplo para enviar comandos ESC/POS ya preparados:
+Ejemplo para enviar comandos ESC/POS ya preparados (hexadecimal):
 
 ```json
 {
@@ -54,6 +54,8 @@ Ejemplo para enviar comandos ESC/POS ya preparados:
   "content": "1b4068656c6c6f0a1d5630"
 }
 ```
+
+También puedes enviar el binario en base64 (útil si generas bytes desde otra librería) usando la misma clave `content`.
 
 ## Seguridad
 
