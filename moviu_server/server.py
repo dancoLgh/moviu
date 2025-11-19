@@ -20,7 +20,7 @@ class PrinterSettings(BaseModel):
 
 
 class PrintRequest(BaseModel):
-    mode: str = Field("html", description="html | image | raw")
+    mode: str = Field("html", description="html | image | raw | raw_text")
     content: str = Field(..., description="Payload del trabajo")
     printer: Optional[PrinterSettings] = None
 

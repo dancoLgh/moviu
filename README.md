@@ -7,7 +7,7 @@ Servidor de impresión local para convertir HTML → imagen → ESC/POS y expone
 - Aplicación de escritorio (Tkinter) que inicia/detiene el servidor.
 - API REST (`FastAPI`) accesible mediante `X-API-Key`.
 - Convierte HTML plano o imágenes base64 en comandos ESC/POS listos para impresoras térmicas.
-- Permite enviar comandos ESC/POS sin transformación (`mode="raw"`).
+- Permite enviar comandos ESC/POS sin transformación (`mode="raw"` o `mode="raw_text"`).
 - Enrutamiento a impresoras de red vía TCP configurable por petición.
 
 ## Requisitos
@@ -56,6 +56,15 @@ Ejemplo para enviar comandos ESC/POS ya preparados (hexadecimal):
 ```
 
 También puedes enviar el binario en base64 (útil si generas bytes desde otra librería) usando la misma clave `content`.
+
+Si prefieres enviar la cadena binaria tal cual (sin hex ni base64), usa el modo `raw_text`:
+
+```json
+{
+  "mode": "raw_text",
+  "content": "\u001b@\u001ba\u0001Hola\n\u001dV\u0000"
+}
+```
 
 ## Seguridad
 

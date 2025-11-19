@@ -10,13 +10,13 @@ from typing import Literal, Optional
 
 from PIL import Image
 
-from .escpos import ensure_bytes, image_to_escpos
+from .escpos import image_to_escpos
 from .html_renderer import html_to_image
 
 
 @dataclass
 class PrintJob:
-    mode: Literal["html", "image", "raw"]
+    mode: Literal["html", "image", "raw", "raw_text"]
     content: str
     printer_host: str
     printer_port: int
@@ -45,6 +45,8 @@ class PrintProcessor:
         }
 
     def _build_payload(self, job: PrintJob) -> bytes:
+        if job.mode == "raw_text":
+            return job.content.encode("latin-1")
         if job.mode == "raw":
             return self._decode_raw(job.content)
         if job.mode == "image":
