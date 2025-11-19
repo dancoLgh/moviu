@@ -46,7 +46,7 @@ class PrintProcessor:
 
     def _build_payload(self, job: PrintJob) -> bytes:
         if job.mode == "raw_text":
-            return job.content.encode("latin-1")
+            return self._decode_raw_text(job.content)
         if job.mode == "raw":
             return self._decode_raw(job.content)
         if job.mode == "image":
@@ -72,6 +72,16 @@ class PrintProcessor:
             raise PrinterError(
                 "El contenido raw debe ser una cadena hexadecimal o base64"
             ) from exc
+
+    @staticmethod
+    def _decode_raw_text(content: str) -> bytes:
+        """Decode literal escape sequences ("\\x1b", "\\n", etc.) into bytes."""
+
+        try:
+            decoded = content.encode("utf-8").decode("unicode_escape")
+            return decoded.encode("latin-1")
+        except Exception as exc:  # noqa: BLE001
+            raise PrinterError("No se pudo decodificar raw_text") from exc
 
     @staticmethod
     def _decode_image(data: str) -> Image.Image:

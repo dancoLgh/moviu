@@ -62,7 +62,7 @@ Si prefieres enviar la cadena binaria tal cual (sin hex ni base64), usa el modo 
 ```json
 {
   "mode": "raw_text",
-  "content": "\u001b@\u001ba\u0001Hola\n\u001dV\u0000"
+  "content": "\\x1b@\\x1ba\\x01Hola\\x0a\\x1dV\\x00"
 }
 ```
 
