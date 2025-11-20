@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import io
+import re
 import socket
 from dataclasses import dataclass
 from typing import Literal, Optional
@@ -76,12 +77,26 @@ class PrintProcessor:
 
     @staticmethod
     def _decode_raw_text(content: str, code_page: Optional[str] = None) -> bytes:
-        """Decode literal escape sequences and emit bytes for the chosen code page."""
+        r"""Decode \xNN escapes + newlines without mangling accented characters."""
 
-        encoding = (code_page or "cp437").lower()
+        encoding = (code_page or "cp858").lower()
         try:
-            decoded = content.encode("utf-8").decode("unicode_escape")
-            payload = decoded.encode(encoding, errors="replace")
+            text = content
+
+            # 1) Turn literal "\n"/"\r" into real control characters
+            text = text.replace("\\n", "\n").replace("\\r", "\r")
+
+            # 2) Replace \xHH escape sequences with their character equivalents
+            def _hex_repl(match: re.Match) -> str:
+                value = int(match.group(1), 16)
+                return chr(value)
+
+            text = re.sub(r"\\x([0-9A-Fa-f]{2})", _hex_repl, text)
+
+            # 3) Encode everything using the printer's code page
+            payload = text.encode(encoding, errors="replace")
+
+            # 4) Prefix ESC t n to set the printer code page
             prefix = PrintProcessor._code_page_command(encoding)
             return prefix + payload if prefix else payload
         except LookupError as exc:  # Unknown codec

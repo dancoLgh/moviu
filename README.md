@@ -66,13 +66,13 @@ Si prefieres enviar la cadena binaria tal cual (sin hex ni base64), usa el modo 
 }
 ```
 
-El modo `raw_text` interpreta las secuencias de escape (\n, \t, \x1b, etc.) y codifica el texto en la code page CP437 por defecto, insertando el comando `ESC t n` al inicio para forzar a la impresora a esa misma page. Si tu impresora usa otra code page (por ejemplo CP858 o CP1252), pásala en el campo opcional `code_page` y el servidor enviará el comando correspondiente antes del payload:
+El modo `raw_text` interpreta las secuencias de escape (\n, \t, \x1b, etc.) sin romper los acentos y codifica el texto en la code page CP858 por defecto, insertando el comando `ESC t n` al inicio para forzar a la impresora a esa misma page. Si tu impresora usa otra code page (por ejemplo CP437 o CP1252), pásala en el campo opcional `code_page` y el servidor enviará el comando correspondiente antes del payload:
 
 ```json
 {
   "mode": "raw_text",
   "code_page": "cp858",
-  "content": "\\x1b@\\x1bt\\x09Hola Sebasti\\xA2n\\x0a\\x1dV\\x00"
+  "content": "\\x1b@Hola Sebasti\\xA2n\\x0a\\x1dV\\x00"
 }
 ```
 
