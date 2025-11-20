@@ -72,11 +72,11 @@ El modo `raw_text` interpreta las secuencias de escape (\n, \t, \x1b, etc.) y co
 {
   "mode": "raw_text",
   "code_page": "cp858",
-  "content": "\\x1b@\\x1bt\\x13Hola Sebasti\\xA2n\\x0a\\x1dV\\x00"
+  "content": "\\x1b@\\x1bt\\x09Hola Sebasti\\xA2n\\x0a\\x1dV\\x00"
 }
 ```
 
-Code pages soportadas para `raw_text`: `cp437`, `cp850`, `cp852`, `cp858`, `cp1252`/`latin-1`. Si pasas una no soportada, la API devuelve error de validación.
+Code pages soportadas para `raw_text`: `cp437` (ESC t 0), `cp850` (ESC t 2), `cp860` (ESC t 3), `cp863` (ESC t 4), `cp865` (ESC t 5), `cp1252`/`latin-1` (ESC t 6), `cp866` (ESC t 7), `cp852` (ESC t 8) y `cp858` (ESC t 9). Si pasas una no soportada, la API devuelve error de validación.
 
 ## Seguridad
 

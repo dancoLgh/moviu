@@ -91,21 +91,33 @@ class PrintProcessor:
 
     @staticmethod
     def _code_page_command(encoding: str) -> bytes:
-        """Return the ESC t n sequence for common code pages if known."""
+        """Return the ESC t n sequence for common code pages if known.
+
+        The indexes match the typical ESC/POS tables shown by most thermal
+        printers (0=PC437, 2=PC850, 6=Windows-1252, 8=PC852, 9=PC858, etc.).
+        """
 
         mapping = {
             "cp437": 0,
             "437": 0,
             "cp850": 2,
             "850": 2,
-            "cp852": 18,
-            "852": 18,
-            "cp858": 19,
-            "858": 19,
-            "cp1252": 16,
-            "windows-1252": 16,
-            "latin-1": 16,
-            "iso-8859-1": 16,
+            "cp860": 3,
+            "860": 3,
+            "cp863": 4,
+            "863": 4,
+            "cp865": 5,
+            "865": 5,
+            "cp1252": 6,
+            "windows-1252": 6,
+            "latin-1": 6,
+            "iso-8859-1": 6,
+            "cp866": 7,
+            "866": 7,
+            "cp852": 8,
+            "852": 8,
+            "cp858": 9,
+            "858": 9,
         }
         if encoding not in mapping:
             return b""
