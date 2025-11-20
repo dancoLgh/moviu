@@ -9,7 +9,7 @@ Servidor de impresión local para convertir HTML → imagen → ESC/POS y expone
 - Convierte HTML plano o imágenes base64 en comandos ESC/POS listos para impresoras térmicas.
 - Permite enviar comandos ESC/POS sin transformación (`mode="raw"` o `mode="raw_text"`).
 - Enrutamiento a impresoras de red vía TCP configurable por petición.
-- Modo de simulación de impresora que guarda los trabajos en disco para entornos de desarrollo.
+- Modo de simulación de impresora que guarda los trabajos en disco y devuelve vistas previas para entornos de desarrollo.
 - Visor de logs en la propia aplicación de escritorio.
 
 ## Requisitos
@@ -26,10 +26,10 @@ pip install -r requirements.txt
    ```bash
    python main.py
    ```
-2. Configura host, puerto, datos de la impresora y guarda.
+2. Configura host, puerto, datos de la impresora y guarda. Por defecto el servidor arranca automáticamente al abrir la app; puedes desactivar/activar este comportamiento con la casilla "Iniciar servidor automáticamente".
 3. Opcional: genera/descarga el certificado SSL desde los botones "Generar certificados" y "Exportar certificado".
-4. Si quieres evitar envíos reales durante el desarrollo, activa "Simular impresora (solo desarrollo)" para que los trabajos se guarden en `~/.moviu_printer/simulated_jobs/` con una copia binaria (`.bin`) y, cuando aplique, una vista previa en texto (`.txt`/`.hex`) o imagen (`.png`). El log indica la ruta de cada trabajo simulado.
-5. Inicia el servidor desde la propia interfaz. La API key se muestra en la ventana y el log en la parte inferior.
+4. Si quieres evitar envíos reales durante el desarrollo, activa "Simular impresora (solo desarrollo)" para que los trabajos se guarden en `~/.moviu_printer/simulated_jobs/` con una copia binaria (`.bin`) y, cuando aplique, una vista previa en texto (`.txt`/`.hex`) o imagen (`.png`). El log indica la ruta de cada trabajo simulado y el botón "Abrir simulaciones" abre la carpeta. La respuesta de la API también incluirá un bloque `preview` con texto/HTML/hex y la imagen en base64 cuando la simulación esté activa.
+5. Inicia el servidor desde la propia interfaz si no se inició solo. La API key se muestra en la ventana y el log en la parte inferior.
 
 ### Endpoint principal
 
@@ -59,6 +59,8 @@ Ejemplo para enviar comandos ESC/POS ya preparados (hexadecimal):
 }
 ```
 
+Para forzar la impresora virtual en un entorno de desarrollo sin cambiar la configuración global, añade `"simulate": true` al payload. La respuesta incluirá un bloque `preview` con copias en texto/hex/HTML y, si aplica, la imagen en base64.
+
 También puedes enviar el binario en base64 (útil si generas bytes desde otra librería) usando la misma clave `content`.
 
 Si prefieres enviar la cadena binaria tal cual (sin hex ni base64), usa el modo `raw_text`:
@@ -82,6 +84,15 @@ El modo `raw_text` interpreta las secuencias de escape (\n, \t, \x1b, etc.) sin 
 
 Code pages soportadas para `raw_text`: `cp437` (ESC t 0), `cp850` (ESC t 2), `cp860` (ESC t 3), `cp863` (ESC t 4), `cp865` (ESC t 5), `cp1252`/`latin-1` (ESC t 6), `cp866` (ESC t 7), `cp852` (ESC t 8) y `cp858` (ESC t 9). Si pasas una no soportada, la API devuelve error de validación.
 
+### Vista previa para modo desarrollo
+
+- Activa la casilla "Simular impresora" o envía `"simulate": true` en el cuerpo de la petición.
+- La API responderá con `status="simulated"` y un objeto `preview` que incluye:
+  - `text`, `hex` u `html` con el contenido recibido.
+  - `image_base64` cuando el modo genera imagen (HTML o image).
+  - `payload_path` con la ruta del `.bin` guardado y los puertos/host utilizados para la simulación.
+- Todos los artefactos quedan en `~/.moviu_printer/simulated_jobs/` y se pueden abrir desde el botón "Abrir simulaciones" de la app.
+
 ## Generar instaladores
 
 ### Windows (ejecutable .exe)
@@ -95,6 +106,7 @@ Code pages soportadas para `raw_text`: `cp437` (ESC t 0), `cp850` (ESC t 2), `cp
    pyinstaller --noconfirm --noconsole --onefile --name MoviuPrintServer main.py
    ```
 3. El binario queda en `dist/MoviuPrintServer.exe`. Copia todo el directorio `dist/` al equipo destino; al arrancar, la app crea `~/.moviu_printer/` con la configuración y certificados.
+4. El servidor se levanta automáticamente al abrir la app (configurable en la interfaz). Si quieres que la app arranque minimizada al inicio del sistema, crea un acceso directo en la carpeta "Inicio" de Windows apuntando al ejecutable generado.
 
 ### Debian/Ubuntu (.deb)
 
@@ -129,6 +141,7 @@ Code pages soportadas para `raw_text`: `cp437` (ESC t 0), `cp850` (ESC t 2), `cp
    ```bash
    sudo dpkg -i dist/moviu-print-server.deb
    ```
+6. Al lanzar `/usr/local/bin/moviu-print-server` se abrirá la GUI y el servidor HTTPS se iniciará automáticamente (casilla "Iniciar servidor automáticamente"). Para arrancarlo al inicio de sesión puedes crear un servicio systemd o un `.desktop` en `~/.config/autostart/` apuntando al ejecutable.
 
 ## Seguridad
 

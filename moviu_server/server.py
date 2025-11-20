@@ -27,6 +27,9 @@ class PrintRequest(BaseModel):
         None,
         description="Code page a usar para raw_text (p.ej. cp437, cp850, cp858, cp1252)",
     )
+    simulate: Optional[bool] = Field(
+        None, description="Forzar simulación/impresora virtual (solo desarrollo)"
+    )
 
 
 class PrintResponse(BaseModel):
@@ -34,6 +37,7 @@ class PrintResponse(BaseModel):
     host: str
     port: int
     bytes: int
+    preview: Optional[dict] = Field(None, description="Vista previa del trabajo si aplica")
 
 
 def create_api(config: AppConfig) -> FastAPI:
@@ -50,6 +54,11 @@ def create_api(config: AppConfig) -> FastAPI:
     def print_endpoint(request: PrintRequest, _: None = Depends(require_api_key)) -> PrintResponse:
         printer_host = request.printer.host if request.printer else config.printer_host
         printer_port = request.printer.port if request.printer else config.printer_port
+        simulate = (
+            request.simulate
+            if request.simulate is not None
+            else config.simulate_printer
+        )
         job = PrintJob(
             mode=request.mode,
             content=request.content,
@@ -58,7 +67,7 @@ def create_api(config: AppConfig) -> FastAPI:
             code_page=request.code_page,
         )
         try:
-            result = processor.process(job)
+            result = processor.process(job, simulate_override=simulate)
         except PrinterError as exc:
             LOGGER.exception("Print job failed")
             raise HTTPException(status_code=400, detail=str(exc)) from exc

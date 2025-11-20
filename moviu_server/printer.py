@@ -40,20 +40,27 @@ class PrintProcessor:
         self.default_port = default_port
         self.simulate = simulate
 
-    def process(self, job: PrintJob) -> dict:
+    def process(self, job: PrintJob, simulate_override: Optional[bool] = None) -> dict:
         payload, preview = self._build_payload(job)
-        if self.simulate:
-            self._simulate_output(job, payload, preview)
+        simulate = self.simulate if simulate_override is None else simulate_override
+        preview_data: dict | None = None
+
+        if simulate:
+            preview_data = self._simulate_output(job, payload, preview)
             status = "simulated"
         else:
             self._send_to_printer(payload, job.printer_host, job.printer_port)
             status = "sent"
-        return {
+
+        response = {
             "status": status,
             "host": job.printer_host,
             "port": job.printer_port,
             "bytes": len(payload),
         }
+        if preview_data:
+            response["preview"] = preview_data
+        return response
 
     def _build_payload(self, job: PrintJob) -> tuple[bytes, dict]:
         preview: dict = {}
@@ -178,7 +185,7 @@ class PrintProcessor:
                 f"No se pudo enviar el trabajo a {target_host}:{target_port}: {exc}"
             ) from exc
 
-    def _simulate_output(self, job: PrintJob, payload: bytes, preview: dict) -> None:
+    def _simulate_output(self, job: PrintJob, payload: bytes, preview: dict) -> dict:
         jobs_dir = CONFIG_DIR / "simulated_jobs"
         jobs_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -194,24 +201,39 @@ class PrintProcessor:
             f"Bytes: {len(payload)}",
         ]
 
+        inline_preview: dict = {
+            "host": job.printer_host or self.default_host,
+            "port": job.printer_port or self.default_port,
+            "payload_path": str(payload_path),
+        }
+
         if "text" in preview:
             text_path = base.with_suffix(".txt")
             text_path.write_text(preview["text"], encoding="utf-8")
             summary_lines.append(f"Vista previa texto: {text_path}")
+            inline_preview["text"] = preview["text"]
         if "hex" in preview:
             hex_path = base.with_suffix(".hex")
             hex_path.write_text(preview["hex"], encoding="utf-8")
             summary_lines.append(f"Hex dump: {hex_path}")
+            inline_preview["hex"] = preview["hex"]
         if "html" in preview:
             html_path = base.with_suffix(".html")
             html_path.write_text(preview["html"], encoding="utf-8")
             summary_lines.append(f"HTML recibido: {html_path}")
+            inline_preview["html"] = preview["html"]
         if "image" in preview:
             image_path = base.with_suffix(".png")
             try:
                 preview["image"].save(image_path)
                 summary_lines.append(f"Previsualización: {image_path}")
+                buffer = io.BytesIO()
+                preview["image"].save(buffer, format="PNG")
+                inline_preview["image_base64"] = base64.b64encode(buffer.getvalue()).decode(
+                    "ascii"
+                )
             except Exception as exc:  # noqa: BLE001
                 logging.warning("No se pudo guardar la vista previa de imagen: %s", exc)
         summary = " | ".join(summary_lines)
         logging.info("Trabajo simulado guardado en %s (%s)", payload_path, summary)
+        return inline_preview

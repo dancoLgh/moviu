@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import logging
+import os
+import subprocess
+import sys
 import threading
 import tkinter as tk
 from pathlib import Path
@@ -11,7 +14,7 @@ from tkinter import filedialog, messagebox
 import uvicorn
 
 from .certs import certificates_folder, ensure_certificates, export_certificate
-from .config import AppConfig, load_config, save_config
+from .config import AppConfig, CONFIG_DIR, load_config, save_config
 from .server import create_api
 
 
@@ -59,6 +62,8 @@ class DesktopApp:
         self.controller = ServerController(self.config)
         self._setup_logging()
         self._build_ui()
+        if self.config.auto_start:
+            self.start_server(auto=True)
 
     def _build_ui(self) -> None:
         frame = tk.Frame(self.root, padx=10, pady=10)
@@ -70,6 +75,7 @@ class DesktopApp:
         self.printer_port_var = tk.StringVar(value=str(self.config.printer_port))
         self.api_key_var = tk.StringVar(value=self.config.api_key)
         self.simulate_var = tk.BooleanVar(value=self.config.simulate_printer)
+        self.auto_start_var = tk.BooleanVar(value=self.config.auto_start)
 
         row = 0
         for label, var in (
@@ -99,6 +105,15 @@ class DesktopApp:
         ).grid(row=row, column=0, columnspan=2, sticky="w")
         row += 1
 
+        tk.Checkbutton(
+            frame,
+            text="Iniciar servidor automáticamente", 
+            variable=self.auto_start_var,
+            onvalue=True,
+            offvalue=False,
+        ).grid(row=row, column=0, columnspan=2, sticky="w")
+        row += 1
+
         btn_frame = tk.Frame(frame)
         btn_frame.grid(row=row, column=0, columnspan=2, pady=10)
         tk.Button(btn_frame, text="Guardar", command=self.save_settings).pack(side=tk.LEFT, padx=5)
@@ -111,6 +126,9 @@ class DesktopApp:
             side=tk.LEFT, padx=5
         )
         tk.Button(btn_frame, text="Exportar certificado", command=self.export_cert).pack(
+            side=tk.LEFT, padx=5
+        )
+        tk.Button(btn_frame, text="Abrir simulaciones", command=self.open_simulations).pack(
             side=tk.LEFT, padx=5
         )
 
@@ -131,15 +149,17 @@ class DesktopApp:
         self.log_widget.configure(yscrollcommand=scrollbar.set)
         self.log_handler.attach(self.log_widget)
 
-    def save_settings(self) -> None:
+    def save_settings(self, notify: bool = True) -> None:
         try:
             self.config.host = self.host_var.get()
             self.config.port = int(self.port_var.get())
             self.config.printer_host = self.printer_host_var.get()
             self.config.printer_port = int(self.printer_port_var.get())
             self.config.simulate_printer = self.simulate_var.get()
+            self.config.auto_start = self.auto_start_var.get()
             save_config(self.config)
-            messagebox.showinfo("Configuración", "Configuración guardada")
+            if notify:
+                messagebox.showinfo("Configuración", "Configuración guardada")
             logging.info("Configuración guardada")
         except ValueError:
             messagebox.showerror("Error", "Puerto inválido")
@@ -153,8 +173,8 @@ class DesktopApp:
         messagebox.showinfo("API Key", "Se generó una nueva API key")
         logging.info("Se regeneró la API key")
 
-    def start_server(self) -> None:
-        self.save_settings()
+    def start_server(self, auto: bool = False) -> None:
+        self.save_settings(notify=not auto)
         self.controller.start()
         protocol = "https"
         self.status_var.set(
@@ -192,6 +212,24 @@ class DesktopApp:
             export_certificate(Path(dest), cert_path)
             messagebox.showinfo("Exportar certificado", f"Certificado copiado a\n{dest}")
             logging.info("Certificado exportado a %s", dest)
+
+    def open_simulations(self) -> None:
+        sims = CONFIG_DIR / "simulated_jobs"
+        sims.mkdir(parents=True, exist_ok=True)
+        logging.info("Abriendo carpeta de simulaciones: %s", sims)
+        try:
+            if os.name == "nt":
+                os.startfile(sims)  # type: ignore[attr-defined]
+            elif sys.platform == "darwin":
+                subprocess.run(["open", str(sims)], check=False)
+            else:
+                subprocess.run(["xdg-open", str(sims)], check=False)
+        except Exception as exc:  # noqa: BLE001
+            logging.error("No se pudo abrir la carpeta de simulaciones: %s", exc)
+            messagebox.showerror(
+                "Simulaciones",
+                f"No se pudo abrir la carpeta de simulaciones:\n{sims}\n\n{exc}",
+            )
 
     def run(self) -> None:
         self.root.mainloop()
