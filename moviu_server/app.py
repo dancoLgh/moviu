@@ -11,9 +11,14 @@ import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox
+from typing import Callable
+
+import pystray
+from PIL import Image, ImageDraw, ImageFont
 
 import uvicorn
 
+from .autostart import configure_autostart
 from .certs import certificates_folder, ensure_certificates, export_certificate
 from .config import AppConfig, CONFIG_DIR, load_config, save_config
 from .server import create_api
@@ -124,6 +129,11 @@ class DesktopApp:
         self._maximize_window()
         self._configure_window_hooks()
         self._register_signal_handlers()
+        self.tray = SystemTray(
+            on_show=self._restore_from_tray,
+            on_exit=lambda: self.root.after(0, self._do_exit),
+        )
+        self._apply_autostart(self.config.auto_start, notify=False)
 
     def _build_ui(self) -> None:
         frame = tk.Frame(self.root, padx=10, pady=10)
@@ -135,6 +145,7 @@ class DesktopApp:
         self.printer_port_var = tk.StringVar(value=str(self.config.printer_port))
         self.api_key_var = tk.StringVar(value=self.config.api_key)
         self.simulate_var = tk.BooleanVar(value=self.config.simulate_printer)
+        self.auto_start_var = tk.BooleanVar(value=self.config.auto_start)
 
         row = 0
         for label, var in (
@@ -159,6 +170,15 @@ class DesktopApp:
             frame,
             text="Simular impresora (solo desarrollo)",
             variable=self.simulate_var,
+            onvalue=True,
+            offvalue=False,
+        ).grid(row=row, column=0, columnspan=2, sticky="w")
+        row += 1
+
+        tk.Checkbutton(
+            frame,
+            text="Ejecutar al iniciar el sistema",
+            variable=self.auto_start_var,
             onvalue=True,
             offvalue=False,
         ).grid(row=row, column=0, columnspan=2, sticky="w")
@@ -206,7 +226,9 @@ class DesktopApp:
             self.config.printer_host = self.printer_host_var.get()
             self.config.printer_port = int(self.printer_port_var.get())
             self.config.simulate_printer = self.simulate_var.get()
+            self.config.auto_start = self.auto_start_var.get()
             save_config(self.config)
+            self._apply_autostart(self.config.auto_start)
             if notify:
                 messagebox.showinfo("Configuración", "Configuración guardada")
             logging.info("Configuración guardada")
@@ -238,7 +260,36 @@ class DesktopApp:
 
     def _do_exit(self) -> None:
         self.stop_server()
+        self.tray.stop()
         self.root.destroy()
+
+    def _minimize_to_background(self) -> None:
+        """Send the window to the system tray instead of closing it."""
+
+        try:
+            self.root.withdraw()
+        except Exception:
+            try:
+                self.root.iconify()
+            except Exception:
+                logging.debug("No se pudo ocultar la ventana; se mantendrá visible")
+                return
+
+        self.tray.start()
+        logging.info("Ventana enviada a la bandeja del sistema; el servidor sigue activo")
+
+    def _restore_from_tray(self) -> None:
+        def _show() -> None:
+            self.tray.stop()
+            try:
+                self.root.deiconify()
+                self.root.state("normal")
+                self.root.lift()
+                self.root.focus_force()
+            except Exception:
+                logging.debug("No se pudo restaurar la ventana desde la bandeja")
+
+        self.root.after(0, _show)
 
     def generate_certs(self) -> None:
         cert_path, key_path = ensure_certificates(
@@ -304,7 +355,7 @@ class DesktopApp:
         logging.getLogger().addHandler(self.log_handler)
 
     def _configure_window_hooks(self) -> None:
-        self.root.protocol("WM_DELETE_WINDOW", self._do_exit)
+        self.root.protocol("WM_DELETE_WINDOW", self._minimize_to_background)
 
     def _maximize_window(self) -> None:
         """Try platform-specific ways to show the window maximized."""
@@ -340,6 +391,24 @@ class DesktopApp:
             # Not all platforms allow overriding SIGINT in GUI apps
             logging.debug("SIGINT handler no disponible en esta plataforma")
 
+    def _apply_autostart(self, enabled: bool, notify: bool = True) -> None:
+        try:
+            configure_autostart(enabled)
+        except Exception as exc:  # noqa: BLE001
+            logging.error("No se pudo actualizar el autoinicio: %s", exc)
+            if notify:
+                messagebox.showerror(
+                    "Autoinicio",
+                    "No se pudo configurar el inicio automático:\n" f"{exc}",
+                )
+            self.auto_start_var.set(False)
+            self.config.auto_start = False
+            save_config(self.config)
+        else:
+            if notify:
+                estado = "activado" if enabled else "desactivado"
+                logging.info("Autoinicio %s", estado)
+
 
 class _TextHandler(logging.Handler):
     """Send log records to a Tkinter Text widget."""
@@ -364,6 +433,52 @@ class _TextHandler(logging.Handler):
         self.widget.insert(tk.END, msg + "\n")
         self.widget.see(tk.END)
         self.widget.configure(state="disabled")
+
+
+class SystemTray:
+    """Lightweight system tray controller to restore or exit the app."""
+
+    def __init__(self, on_show: Callable[[], None], on_exit: Callable[[], None]) -> None:
+        self.on_show = on_show
+        self.on_exit = on_exit
+        self.icon: pystray.Icon | None = None
+
+    def start(self) -> None:
+        if self.icon and self.icon.visible:
+            return
+
+        image = self._create_image()
+        menu = pystray.Menu(
+            pystray.MenuItem("Mostrar", self._handle_show),
+            pystray.MenuItem("Salir", self._handle_exit),
+        )
+        self.icon = pystray.Icon("moviu_print_server", image, "Moviu Print Server", menu)
+        self.icon.run_detached()
+
+    def stop(self) -> None:
+        if self.icon:
+            self.icon.stop()
+            self.icon = None
+
+    def _handle_show(self, _icon: pystray.Icon, _item: pystray.MenuItem) -> None:
+        self.on_show()
+
+    def _handle_exit(self, _icon: pystray.Icon, _item: pystray.MenuItem) -> None:
+        self.stop()
+        self.on_exit()
+
+    def _create_image(self) -> Image.Image:
+        size = 64
+        image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(image)
+        draw.rounded_rectangle((6, 6, size - 6, size - 6), radius=12, fill=(24, 79, 254, 255))
+        font = ImageFont.load_default()
+        text = "M"
+        bbox = draw.textbbox((0, 0), text, font=font)
+        text_w = bbox[2] - bbox[0]
+        text_h = bbox[3] - bbox[1]
+        draw.text(((size - text_w) / 2, (size - text_h) / 2), text, font=font, fill="white")
+        return image
 
 
 def _ensure_streams() -> None:
