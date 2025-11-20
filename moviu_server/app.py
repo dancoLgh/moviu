@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import signal
 import subprocess
 import sys
 import threading
@@ -121,11 +122,13 @@ class DesktopApp:
         self.config = load_config()
         self.controller = ServerController(self.config)
         self.tray_icon: pystray.Icon | None = None
+        self.tray_thread: threading.Thread | None = None
         self.icon_image = self._build_tray_image()
         _ensure_streams()
         self._setup_logging()
         self._build_ui()
         self._configure_window_hooks()
+        self._register_signal_handlers()
         if self.config.auto_start:
             self.start_server(auto=True)
         if start_minimized or self.config.auto_start:
@@ -258,8 +261,15 @@ class DesktopApp:
         self.root.withdraw()
         if not self.tray_icon:
             self.tray_icon = self._create_tray_icon()
-            self.tray_icon.run_detached()
-        else:
+            try:
+                self.tray_thread = threading.Thread(
+                    target=self.tray_icon.run, name="tray-icon", daemon=True
+                )
+                self.tray_thread.start()
+            except Exception as exc:  # noqa: BLE001
+                logging.error("No se pudo iniciar el icono de bandeja: %s", exc)
+                self.tray_icon = None
+        elif self.tray_icon:
             self.tray_icon.visible = True
         if not initial:
             logging.info("Moviu Print Server minimizado a la bandeja del sistema")
@@ -282,6 +292,8 @@ class DesktopApp:
         if self.tray_icon:
             self.tray_icon.visible = False
             self.tray_icon.stop()
+        if self.tray_thread and self.tray_thread.is_alive():
+            self.tray_thread.join(timeout=1)
         self.root.destroy()
 
     def generate_certs(self) -> None:
@@ -350,6 +362,18 @@ class DesktopApp:
     def _configure_window_hooks(self) -> None:
         self.root.protocol("WM_DELETE_WINDOW", self.hide_to_tray)
         # Let double-click on tray restore window
+
+    def _register_signal_handlers(self) -> None:
+        """Allow Ctrl+C/SIGINT to close the app cleanly, even when hidden."""
+
+        def _sigint_handler(_sig: int, _frame: object) -> None:
+            self.root.after(0, self._do_exit)
+
+        try:
+            signal.signal(signal.SIGINT, _sigint_handler)
+        except Exception:
+            # Not all platforms allow overriding SIGINT in GUI apps
+            logging.debug("SIGINT handler no disponible en esta plataforma")
 
     def _create_tray_icon(self) -> pystray.Icon:
         menu = pystray.Menu(
