@@ -1,0 +1,4 @@
+/build
+/dist
+/moviu_server/__pycache__
+MoviuPrintServer.spec

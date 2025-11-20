@@ -6,6 +6,7 @@ import logging
 from typing import Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from .config import AppConfig
@@ -44,14 +45,37 @@ def create_api(config: AppConfig) -> FastAPI:
     processor = PrintProcessor(
         config.printer_host, config.printer_port, simulate=config.simulate_printer
     )
+
     app = FastAPI(title="Moviu Print Server", version="1.0.0")
+
+    # ------------------------------------------------------------------
+    # CORS: permitir cualquier origen (no usamos cookies, solo X-API-Key)
+    # ------------------------------------------------------------------
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],      # permitir todos los orígenes
+        allow_credentials=False,  # obligatorio si usamos "*"
+        allow_methods=["*"],      # permite OPTIONS, GET, POST, etc.
+        allow_headers=["*"],      # permite X-API-Key y demás headers
+    )
 
     def require_api_key(x_api_key: str = Header(..., alias="X-API-Key")) -> None:
         if x_api_key != config.api_key:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="API key inválida")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="API key inválida",
+            )
+
+    # Preflight explícito (opcional pero ayuda a que el navegador esté feliz)
+    @app.options("/api/print")
+    def options_print() -> dict:
+        return {"status": "ok"}
 
     @app.post("/api/print", response_model=PrintResponse)
-    def print_endpoint(request: PrintRequest, _: None = Depends(require_api_key)) -> PrintResponse:
+    def print_endpoint(
+        request: PrintRequest,
+        _: None = Depends(require_api_key),
+    ) -> PrintResponse:
         printer_host = request.printer.host if request.printer else config.printer_host
         printer_port = request.printer.port if request.printer else config.printer_port
         simulate = (
