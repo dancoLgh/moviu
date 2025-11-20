@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
 import logging
 import os
 import signal
@@ -13,9 +12,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
-import pystray
 import uvicorn
-from PIL import Image, ImageDraw
 
 from .certs import certificates_folder, ensure_certificates, export_certificate
 from .config import AppConfig, CONFIG_DIR, load_config, save_config
@@ -116,25 +113,17 @@ class ServerController:
 
 
 class DesktopApp:
-    def __init__(self, *, start_minimized: bool = False) -> None:
+    def __init__(self) -> None:
         self.root = tk.Tk()
         self.root.title("Moviu Print Server")
         self.config = load_config()
         self.controller = ServerController(self.config)
-        self.tray_icon: pystray.Icon | None = None
-        self.tray_thread: threading.Thread | None = None
-        self.icon_image = self._build_tray_image()
         _ensure_streams()
         self._setup_logging()
         self._build_ui()
-        if not start_minimized and not self.config.auto_start:
-            self._maximize_window()
+        self._maximize_window()
         self._configure_window_hooks()
         self._register_signal_handlers()
-        if self.config.auto_start:
-            self.start_server(auto=True)
-        if start_minimized or self.config.auto_start:
-            self.hide_to_tray(initial=True)
 
     def _build_ui(self) -> None:
         frame = tk.Frame(self.root, padx=10, pady=10)
@@ -146,7 +135,6 @@ class DesktopApp:
         self.printer_port_var = tk.StringVar(value=str(self.config.printer_port))
         self.api_key_var = tk.StringVar(value=self.config.api_key)
         self.simulate_var = tk.BooleanVar(value=self.config.simulate_printer)
-        self.auto_start_var = tk.BooleanVar(value=self.config.auto_start)
 
         row = 0
         for label, var in (
@@ -171,15 +159,6 @@ class DesktopApp:
             frame,
             text="Simular impresora (solo desarrollo)",
             variable=self.simulate_var,
-            onvalue=True,
-            offvalue=False,
-        ).grid(row=row, column=0, columnspan=2, sticky="w")
-        row += 1
-
-        tk.Checkbutton(
-            frame,
-            text="Iniciar servidor automáticamente", 
-            variable=self.auto_start_var,
             onvalue=True,
             offvalue=False,
         ).grid(row=row, column=0, columnspan=2, sticky="w")
@@ -227,9 +206,7 @@ class DesktopApp:
             self.config.printer_host = self.printer_host_var.get()
             self.config.printer_port = int(self.printer_port_var.get())
             self.config.simulate_printer = self.simulate_var.get()
-            self.config.auto_start = self.auto_start_var.get()
             save_config(self.config)
-            configure_autostart(self.config.auto_start)
             if notify:
                 messagebox.showinfo("Configuración", "Configuración guardada")
             logging.info("Configuración guardada")
@@ -245,8 +222,8 @@ class DesktopApp:
         messagebox.showinfo("API Key", "Se generó una nueva API key")
         logging.info("Se regeneró la API key")
 
-    def start_server(self, auto: bool = False) -> None:
-        self.save_settings(notify=not auto)
+    def start_server(self) -> None:
+        self.save_settings()
         self.controller.start()
         protocol = "https"
         self.status_var.set(
@@ -259,43 +236,8 @@ class DesktopApp:
         self.status_var.set("Servidor detenido")
         logging.info("Servidor detenido")
 
-    def hide_to_tray(self, initial: bool = False) -> None:
-        self.root.withdraw()
-        if not self.tray_icon:
-            self.tray_icon = self._create_tray_icon()
-            try:
-                self.tray_thread = threading.Thread(
-                    target=self.tray_icon.run, name="tray-icon", daemon=True
-                )
-                self.tray_thread.start()
-            except Exception as exc:  # noqa: BLE001
-                logging.error("No se pudo iniciar el icono de bandeja: %s", exc)
-                self.tray_icon = None
-        elif self.tray_icon:
-            self.tray_icon.visible = True
-        if not initial:
-            logging.info("Moviu Print Server minimizado a la bandeja del sistema")
-
-    def show_window(self, *_: object) -> None:
-        self.root.after(0, self._do_show_window)
-
-    def _do_show_window(self) -> None:
-        self.root.deiconify()
-        self.root.after(0, self.root.lift)
-        if self.tray_icon:
-            self.tray_icon.visible = True
-        logging.info("Ventana restaurada desde la bandeja")
-
-    def exit_app(self, *_: object) -> None:
-        self.root.after(0, self._do_exit)
-
     def _do_exit(self) -> None:
         self.stop_server()
-        if self.tray_icon:
-            self.tray_icon.visible = False
-            self.tray_icon.stop()
-        if self.tray_thread and self.tray_thread.is_alive():
-            self.tray_thread.join(timeout=1)
         self.root.destroy()
 
     def generate_certs(self) -> None:
@@ -362,8 +304,7 @@ class DesktopApp:
         logging.getLogger().addHandler(self.log_handler)
 
     def _configure_window_hooks(self) -> None:
-        self.root.protocol("WM_DELETE_WINDOW", self.hide_to_tray)
-        # Let double-click on tray restore window
+        self.root.protocol("WM_DELETE_WINDOW", self._do_exit)
 
     def _maximize_window(self) -> None:
         """Try platform-specific ways to show the window maximized."""
@@ -388,7 +329,7 @@ class DesktopApp:
             logging.debug("No se pudo maximizar la ventana automáticamente")
 
     def _register_signal_handlers(self) -> None:
-        """Allow Ctrl+C/SIGINT to close the app cleanly, even when hidden."""
+        """Allow Ctrl+C/SIGINT to close the app cleanly."""
 
         def _sigint_handler(_sig: int, _frame: object) -> None:
             self.root.after(0, self._do_exit)
@@ -398,32 +339,6 @@ class DesktopApp:
         except Exception:
             # Not all platforms allow overriding SIGINT in GUI apps
             logging.debug("SIGINT handler no disponible en esta plataforma")
-
-    def _create_tray_icon(self) -> pystray.Icon:
-        menu = pystray.Menu(
-            pystray.MenuItem(
-                "Mostrar", lambda _icon, _item: self.root.after(0, self._do_show_window), default=True
-            ),
-            pystray.MenuItem(
-                "Iniciar servidor", lambda _icon, _item: self.root.after(0, self.start_server)
-            ),
-            pystray.MenuItem(
-                "Detener servidor", lambda _icon, _item: self.root.after(0, self.stop_server)
-            ),
-            pystray.MenuItem("Salir", lambda _icon, _item: self.root.after(0, self._do_exit)),
-        )
-        icon = pystray.Icon("moviu_print_server", self.icon_image, "Moviu Print Server", menu)
-        icon.visible = True
-        return icon
-
-    def _build_tray_image(self) -> Image.Image:
-        size = 64
-        image = Image.new("RGBA", (size, size), (31, 41, 61, 255))
-        draw = ImageDraw.Draw(image)
-        draw.rectangle([8, 16, 56, 48], outline=(255, 255, 255, 255), width=3)
-        draw.rectangle([16, 24, 48, 40], fill=(99, 179, 237, 255))
-        draw.text((20, 18), "M", fill=(255, 255, 255, 255))
-        return image
 
 
 class _TextHandler(logging.Handler):
@@ -460,58 +375,8 @@ def _ensure_streams() -> None:
         sys.stderr = open(os.devnull, "w", encoding="utf-8")  # type: ignore[assignment]
 
 
-def configure_autostart(enable: bool) -> None:
-    """Create or remove OS-level autostart entries to launch minimized."""
-
-    try:
-        if os.name == "nt":
-            startup = Path(os.getenv("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
-            if not startup:
-                return
-            script = startup / "moviu_print_server.cmd"
-            if enable:
-                startup.mkdir(parents=True, exist_ok=True)
-                if getattr(sys, "frozen", False):
-                    command = f'"{sys.executable}" --minimized'
-                else:
-                    main_path = Path(__file__).resolve().parent.parent / "main.py"
-                    command = f'"{sys.executable}" "{main_path}" --minimized'
-                cmd = f"@echo off\nstart \"\" {command}\n"
-                script.write_text(cmd, encoding="utf-8")
-            elif script.exists():
-                script.unlink()
-        else:
-            autostart_dir = Path.home() / ".config" / "autostart"
-            desktop = autostart_dir / "moviu-print-server.desktop"
-            if enable:
-                autostart_dir.mkdir(parents=True, exist_ok=True)
-                if getattr(sys, "frozen", False):
-                    exec_cmd = f'"{sys.executable}" --minimized'
-                else:
-                    main_path = Path(__file__).resolve().parent.parent / "main.py"
-                    exec_cmd = f'"{sys.executable}" "{main_path}" --minimized'
-                desktop.write_text(
-                    """[Desktop Entry]
-Type=Application
-Name=Moviu Print Server
-Exec={exec_cmd}
-X-GNOME-Autostart-enabled=true
-Hidden=false
-""".format(exec_cmd=exec_cmd),
-                    encoding="utf-8",
-                )
-            elif desktop.exists():
-                desktop.unlink()
-    except Exception as exc:  # noqa: BLE001
-        logging.error("No se pudo actualizar el autostart: %s", exc)
-
-
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Moviu Print Server")
-    parser.add_argument("--minimized", action="store_true", help="Iniciar en bandeja")
-    args = parser.parse_args()
-
-    app = DesktopApp(start_minimized=args.minimized)
+    app = DesktopApp()
     app.run()
 
 

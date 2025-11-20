@@ -22,7 +22,6 @@ class AppConfig:
     printer_host: str = "192.168.0.100"
     printer_port: int = 9100
     simulate_printer: bool = False
-    auto_start: bool = True
     ssl_cert_path: str = str(CONFIG_DIR / "cert.pem")
     ssl_key_path: str = str(CONFIG_DIR / "key.pem")
 
@@ -36,7 +35,6 @@ class AppConfig:
             printer_host=data.get("printer_host", cls.printer_host),
             printer_port=int(data.get("printer_port", cls.printer_port)),
             simulate_printer=bool(data.get("simulate_printer", cls.simulate_printer)),
-            auto_start=bool(data.get("auto_start", cls.auto_start)),
             ssl_cert_path=data.get("ssl_cert_path", str(cls.ssl_cert_path)),
             ssl_key_path=data.get("ssl_key_path", str(cls.ssl_key_path)),
         )
