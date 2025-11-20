@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 import tkinter as tk
-from tkinter import messagebox
+from pathlib import Path
+from tkinter import filedialog, messagebox
 
 import uvicorn
 
+from .certs import certificates_folder, ensure_certificates, export_certificate
 from .config import AppConfig, load_config, save_config
 from .server import create_api
 
@@ -24,11 +27,16 @@ class ServerController:
         if self.server and self.server.started:
             return
         app = create_api(self.config)
+        cert_path, key_path = ensure_certificates(
+            Path(self.config.ssl_cert_path), Path(self.config.ssl_key_path), self.config.host
+        )
         uvicorn_config = uvicorn.Config(
             app,
             host=self.config.host,
             port=self.config.port,
             log_level="info",
+            ssl_certfile=str(cert_path),
+            ssl_keyfile=str(key_path),
         )
         self.server = uvicorn.Server(uvicorn_config)
         self.thread = threading.Thread(target=self.server.run, daemon=True)
@@ -49,6 +57,7 @@ class DesktopApp:
         self.root.title("Moviu Print Server")
         self.config = load_config()
         self.controller = ServerController(self.config)
+        self._setup_logging()
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -60,6 +69,7 @@ class DesktopApp:
         self.printer_host_var = tk.StringVar(value=self.config.printer_host)
         self.printer_port_var = tk.StringVar(value=str(self.config.printer_port))
         self.api_key_var = tk.StringVar(value=self.config.api_key)
+        self.simulate_var = tk.BooleanVar(value=self.config.simulate_printer)
 
         row = 0
         for label, var in (
@@ -80,6 +90,15 @@ class DesktopApp:
         )
         row += 1
 
+        tk.Checkbutton(
+            frame,
+            text="Simular impresora (solo desarrollo)",
+            variable=self.simulate_var,
+            onvalue=True,
+            offvalue=False,
+        ).grid(row=row, column=0, columnspan=2, sticky="w")
+        row += 1
+
         btn_frame = tk.Frame(frame)
         btn_frame.grid(row=row, column=0, columnspan=2, pady=10)
         tk.Button(btn_frame, text="Guardar", command=self.save_settings).pack(side=tk.LEFT, padx=5)
@@ -88,11 +107,29 @@ class DesktopApp:
         )
         tk.Button(btn_frame, text="Iniciar", command=self.start_server).pack(side=tk.LEFT, padx=5)
         tk.Button(btn_frame, text="Detener", command=self.stop_server).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="Generar certificados", command=self.generate_certs).pack(
+            side=tk.LEFT, padx=5
+        )
+        tk.Button(btn_frame, text="Exportar certificado", command=self.export_cert).pack(
+            side=tk.LEFT, padx=5
+        )
 
         self.status_var = tk.StringVar(value="Servidor detenido")
         tk.Label(frame, textvariable=self.status_var, fg="blue").grid(
             row=row + 1, column=0, columnspan=2, sticky="w"
         )
+
+        log_frame = tk.LabelFrame(frame, text="Log")
+        log_frame.grid(row=row + 2, column=0, columnspan=2, sticky="nsew", pady=10)
+        frame.rowconfigure(row + 2, weight=1)
+        log_frame.rowconfigure(0, weight=1)
+        log_frame.columnconfigure(0, weight=1)
+        self.log_widget = tk.Text(log_frame, height=10, state="disabled")
+        self.log_widget.grid(row=0, column=0, sticky="nsew")
+        scrollbar = tk.Scrollbar(log_frame, command=self.log_widget.yview)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        self.log_widget.configure(yscrollcommand=scrollbar.set)
+        self.log_handler.attach(self.log_widget)
 
     def save_settings(self) -> None:
         try:
@@ -100,8 +137,10 @@ class DesktopApp:
             self.config.port = int(self.port_var.get())
             self.config.printer_host = self.printer_host_var.get()
             self.config.printer_port = int(self.printer_port_var.get())
+            self.config.simulate_printer = self.simulate_var.get()
             save_config(self.config)
             messagebox.showinfo("Configuración", "Configuración guardada")
+            logging.info("Configuración guardada")
         except ValueError:
             messagebox.showerror("Error", "Puerto inválido")
 
@@ -112,20 +151,91 @@ class DesktopApp:
         self.api_key_var.set(self.config.api_key)
         save_config(self.config)
         messagebox.showinfo("API Key", "Se generó una nueva API key")
+        logging.info("Se regeneró la API key")
 
     def start_server(self) -> None:
         self.save_settings()
         self.controller.start()
+        protocol = "https"
         self.status_var.set(
-            f"Servidor escuchando en http://{self.config.host}:{self.config.port}"
+            f"Servidor escuchando en {protocol}://{self.config.host}:{self.config.port}"
         )
+        logging.info("Servidor iniciado con SSL")
 
     def stop_server(self) -> None:
         self.controller.stop()
         self.status_var.set("Servidor detenido")
+        logging.info("Servidor detenido")
+
+    def generate_certs(self) -> None:
+        cert_path, key_path = ensure_certificates(
+            Path(self.config.ssl_cert_path), Path(self.config.ssl_key_path), self.config.host
+        )
+        messagebox.showinfo(
+            "Certificados",
+            f"Certificado generado en:\n{cert_path}\n\nClave privada:\n{key_path}",
+        )
+        logging.info("Certificados SSL generados")
+
+    def export_cert(self) -> None:
+        cert_path, _ = ensure_certificates(
+            Path(self.config.ssl_cert_path), Path(self.config.ssl_key_path), self.config.host
+        )
+        dest = filedialog.asksaveasfilename(
+            defaultextension=".crt",
+            filetypes=[("Certificado", "*.crt"), ("PEM", "*.pem"), ("Todos", "*.*")],
+            initialfile="moviu_cert.crt",
+            initialdir=certificates_folder(),
+            title="Exportar certificado público",
+        )
+        if dest:
+            export_certificate(Path(dest), cert_path)
+            messagebox.showinfo("Exportar certificado", f"Certificado copiado a\n{dest}")
+            logging.info("Certificado exportado a %s", dest)
 
     def run(self) -> None:
         self.root.mainloop()
+
+    def _setup_logging(self) -> None:
+        log_file = certificates_folder() / "app.log"
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s [%(levelname)s] %(message)s",
+            handlers=[
+                logging.FileHandler(log_file, encoding="utf-8"),
+                logging.StreamHandler(),
+            ],
+        )
+        self.log_handler = _TextHandler(None)
+        formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+        self.log_handler.setFormatter(formatter)
+        logging.getLogger().addHandler(self.log_handler)
+
+
+class _TextHandler(logging.Handler):
+    """Send log records to a Tkinter Text widget."""
+
+    def __init__(self, widget: tk.Text | None) -> None:
+        super().__init__()
+        self.widget = widget
+
+    def attach(self, widget: tk.Text) -> None:
+        self.widget = widget
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if not self.widget:
+            return
+        msg = self.format(record)
+        self.widget.after(0, self._append, msg)
+
+    def _append(self, msg: str) -> None:
+        if not self.widget:
+            return
+        self.widget.configure(state="normal")
+        self.widget.insert(tk.END, msg + "\n")
+        self.widget.see(tk.END)
+        self.widget.configure(state="disabled")
 
 
 def main() -> None:

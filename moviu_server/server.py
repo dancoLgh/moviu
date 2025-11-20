@@ -37,7 +37,9 @@ class PrintResponse(BaseModel):
 
 
 def create_api(config: AppConfig) -> FastAPI:
-    processor = PrintProcessor(config.printer_host, config.printer_port)
+    processor = PrintProcessor(
+        config.printer_host, config.printer_port, simulate=config.simulate_printer
+    )
     app = FastAPI(title="Moviu Print Server", version="1.0.0")
 
     def require_api_key(x_api_key: str = Header(..., alias="X-API-Key")) -> None:

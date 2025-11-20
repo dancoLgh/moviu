@@ -11,6 +11,7 @@ from typing import Literal, Optional
 
 from PIL import Image
 
+from .config import CONFIG_DIR
 from .escpos import image_to_escpos
 from .html_renderer import html_to_image
 
@@ -32,15 +33,21 @@ class PrinterError(RuntimeError):
 class PrintProcessor:
     """Handle conversions and network transmission."""
 
-    def __init__(self, default_host: str, default_port: int) -> None:
+    def __init__(self, default_host: str, default_port: int, simulate: bool = False) -> None:
         self.default_host = default_host
         self.default_port = default_port
+        self.simulate = simulate
 
     def process(self, job: PrintJob) -> dict:
         payload = self._build_payload(job)
-        self._send_to_printer(payload, job.printer_host, job.printer_port)
+        if self.simulate:
+            self._simulate_output(payload)
+            status = "simulated"
+        else:
+            self._send_to_printer(payload, job.printer_host, job.printer_port)
+            status = "sent"
         return {
-            "status": "sent",
+            "status": status,
             "host": job.printer_host,
             "port": job.printer_port,
             "bytes": len(payload),
@@ -161,3 +168,9 @@ class PrintProcessor:
             raise PrinterError(
                 f"No se pudo enviar el trabajo a {target_host}:{target_port}: {exc}"
             ) from exc
+
+    def _simulate_output(self, payload: bytes) -> None:
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        output = CONFIG_DIR / "simulated_job.bin"
+        with output.open("ab") as fh:
+            fh.write(payload + b"\n---\n")

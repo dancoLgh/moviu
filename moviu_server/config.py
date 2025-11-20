@@ -21,6 +21,9 @@ class AppConfig:
     api_key: str = secrets.token_hex(16)
     printer_host: str = "192.168.0.100"
     printer_port: int = 9100
+    simulate_printer: bool = False
+    ssl_cert_path: str = str(CONFIG_DIR / "cert.pem")
+    ssl_key_path: str = str(CONFIG_DIR / "key.pem")
 
     @classmethod
     def from_dict(cls, data: Optional[dict]) -> "AppConfig":
@@ -31,6 +34,9 @@ class AppConfig:
             api_key=data.get("api_key", secrets.token_hex(16)),
             printer_host=data.get("printer_host", cls.printer_host),
             printer_port=int(data.get("printer_port", cls.printer_port)),
+            simulate_printer=bool(data.get("simulate_printer", cls.simulate_printer)),
+            ssl_cert_path=data.get("ssl_cert_path", str(cls.ssl_cert_path)),
+            ssl_key_path=data.get("ssl_key_path", str(cls.ssl_key_path)),
         )
 
 
