@@ -127,6 +127,8 @@ class DesktopApp:
         _ensure_streams()
         self._setup_logging()
         self._build_ui()
+        if not start_minimized and not self.config.auto_start:
+            self._maximize_window()
         self._configure_window_hooks()
         self._register_signal_handlers()
         if self.config.auto_start:
@@ -362,6 +364,28 @@ class DesktopApp:
     def _configure_window_hooks(self) -> None:
         self.root.protocol("WM_DELETE_WINDOW", self.hide_to_tray)
         # Let double-click on tray restore window
+
+    def _maximize_window(self) -> None:
+        """Try platform-specific ways to show the window maximized."""
+
+        try:
+            self.root.state("zoomed")  # Windows and many X11 window managers
+            return
+        except Exception:
+            pass
+
+        try:
+            self.root.attributes("-zoomed", True)  # Some Linux environments
+            return
+        except Exception:
+            pass
+
+        try:
+            width = self.root.winfo_screenwidth()
+            height = self.root.winfo_screenheight()
+            self.root.geometry(f"{width}x{height}+0+0")
+        except Exception:
+            logging.debug("No se pudo maximizar la ventana automáticamente")
 
     def _register_signal_handlers(self) -> None:
         """Allow Ctrl+C/SIGINT to close the app cleanly, even when hidden."""
