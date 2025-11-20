@@ -4,7 +4,7 @@ Servidor de impresión local para convertir HTML → imagen → ESC/POS y expone
 
 ## Características
 
-- Aplicación de escritorio (Tkinter) que inicia/detiene el servidor.
+- Aplicación de escritorio (Tkinter) que inicia/detiene el servidor y se minimiza a la bandeja del sistema.
 - API REST (`FastAPI`) accesible mediante `X-API-Key` y servido sobre HTTPS con certificados autogenerados.
 - Convierte HTML plano o imágenes base64 en comandos ESC/POS listos para impresoras térmicas.
 - Permite enviar comandos ESC/POS sin transformación (`mode="raw"` o `mode="raw_text"`).
@@ -26,7 +26,7 @@ pip install -r requirements.txt
    ```bash
    python main.py
    ```
-2. Configura host, puerto, datos de la impresora y guarda. Por defecto el servidor arranca automáticamente al abrir la app; puedes desactivar/activar este comportamiento con la casilla "Iniciar servidor automáticamente".
+2. Configura host, puerto, datos de la impresora y guarda. Por defecto el servidor arranca automáticamente al abrir la app; puedes desactivar/activar este comportamiento con la casilla "Iniciar servidor automáticamente". Al cerrar la ventana se minimiza a la bandeja del sistema y puedes restaurarla con doble clic en el icono.
 3. Opcional: genera/descarga el certificado SSL desde los botones "Generar certificados" y "Exportar certificado".
 4. Si quieres evitar envíos reales durante el desarrollo, activa "Simular impresora (solo desarrollo)" para que los trabajos se guarden en `~/.moviu_printer/simulated_jobs/` con una copia binaria (`.bin`) y, cuando aplique, una vista previa en texto (`.txt`/`.hex`) o imagen (`.png`). El log indica la ruta de cada trabajo simulado y el botón "Abrir simulaciones" abre la carpeta. La respuesta de la API también incluirá un bloque `preview` con texto/HTML/hex y la imagen en base64 cuando la simulación esté activa.
 5. Inicia el servidor desde la propia interfaz si no se inició solo. La API key se muestra en la ventana y el log en la parte inferior.
@@ -95,6 +95,13 @@ Code pages soportadas para `raw_text`: `cp437` (ESC t 0), `cp850` (ESC t 2), `cp
 
 ## Generar instaladores
 
+La app soporta inicio en bandeja (`--minimized`) y puede crear entradas de autostart:
+
+- Windows: se crea/elimina `moviu_print_server.cmd` en la carpeta de Inicio del usuario cuando marcas/desmarcas "Iniciar servidor automáticamente" en la app.
+- Linux: se escribe un `.desktop` en `~/.config/autostart/` con el mismo ajuste.
+
+También puedes ejecutar `python main.py --minimized` (o el ejecutable empaquetado con ese flag) para que arranque directamente en segundo plano.
+
 ### Windows (ejecutable .exe)
 
 1. Instala PyInstaller (solo para empaquetar):
@@ -106,7 +113,7 @@ Code pages soportadas para `raw_text`: `cp437` (ESC t 0), `cp850` (ESC t 2), `cp
    pyinstaller --noconfirm --noconsole --onefile --name MoviuPrintServer main.py
    ```
 3. El binario queda en `dist/MoviuPrintServer.exe`. Copia todo el directorio `dist/` al equipo destino; al arrancar, la app crea `~/.moviu_printer/` con la configuración y certificados.
-4. El servidor se levanta automáticamente al abrir la app (configurable en la interfaz). Si quieres que la app arranque minimizada al inicio del sistema, crea un acceso directo en la carpeta "Inicio" de Windows apuntando al ejecutable generado.
+4. El servidor se levanta automáticamente al abrir la app (configurable en la interfaz). Al marcar "Iniciar servidor automáticamente" se genera un script en la carpeta Inicio para que el ejecutable arranque minimizado a la bandeja con el sistema (lo puedes eliminar desde la propia app desmarcando la casilla).
 
 ### Debian/Ubuntu (.deb)
 
@@ -141,7 +148,7 @@ Code pages soportadas para `raw_text`: `cp437` (ESC t 0), `cp850` (ESC t 2), `cp
    ```bash
    sudo dpkg -i dist/moviu-print-server.deb
    ```
-6. Al lanzar `/usr/local/bin/moviu-print-server` se abrirá la GUI y el servidor HTTPS se iniciará automáticamente (casilla "Iniciar servidor automáticamente"). Para arrancarlo al inicio de sesión puedes crear un servicio systemd o un `.desktop` en `~/.config/autostart/` apuntando al ejecutable.
+6. Al lanzar `/usr/local/bin/moviu-print-server` se abrirá la GUI y el servidor HTTPS se iniciará automáticamente (casilla "Iniciar servidor automáticamente"). La misma casilla crea/elimina un `.desktop` en `~/.config/autostart/` para arrancar minimizado en la bandeja al iniciar sesión.
 
 ## Seguridad
 
