@@ -254,6 +254,16 @@ class DesktopApp:
         self.stop_server()
         self.root.destroy()
 
+    def _minimize_to_background(self) -> None:
+        """Hide the window instead of closing it so the app keeps running."""
+
+        try:
+            self.root.iconify()
+        except Exception:
+            # As a fallback, withdraw removes the window from the screen/taskbar
+            self.root.withdraw()
+        logging.info("Ventana minimizada; la aplicación continúa en segundo plano")
+
     def generate_certs(self) -> None:
         cert_path, key_path = ensure_certificates(
             Path(self.config.ssl_cert_path), Path(self.config.ssl_key_path), self.config.host
@@ -318,7 +328,7 @@ class DesktopApp:
         logging.getLogger().addHandler(self.log_handler)
 
     def _configure_window_hooks(self) -> None:
-        self.root.protocol("WM_DELETE_WINDOW", self._do_exit)
+        self.root.protocol("WM_DELETE_WINDOW", self._minimize_to_background)
 
     def _maximize_window(self) -> None:
         """Try platform-specific ways to show the window maximized."""
