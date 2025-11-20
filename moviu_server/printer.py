@@ -79,7 +79,7 @@ class PrintProcessor:
 
         try:
             decoded = content.encode("utf-8").decode("unicode_escape")
-            return decoded.encode("latin-1")
+            return decoded.encode("cp437", errors="replace")
         except Exception as exc:  # noqa: BLE001
             raise PrinterError("No se pudo decodificar raw_text") from exc
 

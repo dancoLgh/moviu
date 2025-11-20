@@ -66,6 +66,8 @@ Si prefieres enviar la cadena binaria tal cual (sin hex ni base64), usa el modo 
 }
 ```
 
+El modo `raw_text` interpreta las secuencias de escape (\n, \t, \x1b, etc.) y codifica el texto en la code page CP437, que suele ser la predeterminada en impresoras ESC/POS. Para evitar símbolos extraños con acentos, asegúrate de que la impresora esté en la misma code page; puedes forzarla añadiendo el comando `ESC t 0` al inicio del contenido (`"\\x1bt\\x00"`).
+
 ## Seguridad
 
 - La API solo responde cuando la cabecera `X-API-Key` coincide con la clave almacenada localmente.
