@@ -29,6 +29,7 @@ class ServerController:
     def start(self) -> None:
         if self.server and self.server.started:
             return
+        _ensure_streams()
         app = create_api(self.config)
         cert_path, key_path = ensure_certificates(
             Path(self.config.ssl_cert_path), Path(self.config.ssl_key_path), self.config.host
@@ -61,6 +62,7 @@ class DesktopApp:
         self.root.title("Moviu Print Server")
         self.config = load_config()
         self.controller = ServerController(self.config)
+        _ensure_streams()
         self._setup_logging()
         self._build_ui()
         if self.config.auto_start:
@@ -235,7 +237,7 @@ class DesktopApp:
     def run(self) -> None:
         self.root.mainloop()
 
-    def _setup_logging(self) -> None:
+def _setup_logging(self) -> None:
         log_file = certificates_folder() / "app.log"
         log_file.parent.mkdir(parents=True, exist_ok=True)
         logging.basicConfig(
@@ -251,7 +253,7 @@ class DesktopApp:
         self.log_handler.setFormatter(formatter)
         logging.getLogger().addHandler(self.log_handler)
 
-    def _log_config(self) -> dict:
+def _log_config(self) -> dict:
         log_file = certificates_folder() / "app.log"
         stream = sys.stdout or sys.__stdout__
         if stream is None:
@@ -330,6 +332,15 @@ class _TextHandler(logging.Handler):
         self.widget.insert(tk.END, msg + "\n")
         self.widget.see(tk.END)
         self.widget.configure(state="disabled")
+
+
+def _ensure_streams() -> None:
+    """Guarantee stdout/stderr exist for uvicorn log setup (e.g., frozen builds)."""
+
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w", encoding="utf-8")  # type: ignore[assignment]
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w", encoding="utf-8")  # type: ignore[assignment]
 
 
 def main() -> None:
