@@ -14,6 +14,7 @@ from tkinter import filedialog, messagebox
 
 import uvicorn
 
+from .autostart import configure_autostart
 from .certs import certificates_folder, ensure_certificates, export_certificate
 from .config import AppConfig, CONFIG_DIR, load_config, save_config
 from .server import create_api
@@ -124,6 +125,7 @@ class DesktopApp:
         self._maximize_window()
         self._configure_window_hooks()
         self._register_signal_handlers()
+        self._apply_autostart(self.config.auto_start, notify=False)
 
     def _build_ui(self) -> None:
         frame = tk.Frame(self.root, padx=10, pady=10)
@@ -135,6 +137,7 @@ class DesktopApp:
         self.printer_port_var = tk.StringVar(value=str(self.config.printer_port))
         self.api_key_var = tk.StringVar(value=self.config.api_key)
         self.simulate_var = tk.BooleanVar(value=self.config.simulate_printer)
+        self.auto_start_var = tk.BooleanVar(value=self.config.auto_start)
 
         row = 0
         for label, var in (
@@ -159,6 +162,15 @@ class DesktopApp:
             frame,
             text="Simular impresora (solo desarrollo)",
             variable=self.simulate_var,
+            onvalue=True,
+            offvalue=False,
+        ).grid(row=row, column=0, columnspan=2, sticky="w")
+        row += 1
+
+        tk.Checkbutton(
+            frame,
+            text="Ejecutar al iniciar el sistema",
+            variable=self.auto_start_var,
             onvalue=True,
             offvalue=False,
         ).grid(row=row, column=0, columnspan=2, sticky="w")
@@ -206,7 +218,9 @@ class DesktopApp:
             self.config.printer_host = self.printer_host_var.get()
             self.config.printer_port = int(self.printer_port_var.get())
             self.config.simulate_printer = self.simulate_var.get()
+            self.config.auto_start = self.auto_start_var.get()
             save_config(self.config)
+            self._apply_autostart(self.config.auto_start)
             if notify:
                 messagebox.showinfo("Configuración", "Configuración guardada")
             logging.info("Configuración guardada")
@@ -339,6 +353,24 @@ class DesktopApp:
         except Exception:
             # Not all platforms allow overriding SIGINT in GUI apps
             logging.debug("SIGINT handler no disponible en esta plataforma")
+
+    def _apply_autostart(self, enabled: bool, notify: bool = True) -> None:
+        try:
+            configure_autostart(enabled)
+        except Exception as exc:  # noqa: BLE001
+            logging.error("No se pudo actualizar el autoinicio: %s", exc)
+            if notify:
+                messagebox.showerror(
+                    "Autoinicio",
+                    "No se pudo configurar el inicio automático:\n" f"{exc}",
+                )
+            self.auto_start_var.set(False)
+            self.config.auto_start = False
+            save_config(self.config)
+        else:
+            if notify:
+                estado = "activado" if enabled else "desactivado"
+                logging.info("Autoinicio %s", estado)
 
 
 class _TextHandler(logging.Handler):
