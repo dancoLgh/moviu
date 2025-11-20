@@ -21,6 +21,7 @@ class PrintJob:
     printer_host: str
     printer_port: int
     auto_cut: bool = True
+    code_page: Optional[str] = None
 
 
 class PrinterError(RuntimeError):
@@ -46,7 +47,7 @@ class PrintProcessor:
 
     def _build_payload(self, job: PrintJob) -> bytes:
         if job.mode == "raw_text":
-            return self._decode_raw_text(job.content)
+            return self._decode_raw_text(job.content, job.code_page)
         if job.mode == "raw":
             return self._decode_raw(job.content)
         if job.mode == "image":
@@ -74,14 +75,41 @@ class PrintProcessor:
             ) from exc
 
     @staticmethod
-    def _decode_raw_text(content: str) -> bytes:
-        """Decode literal escape sequences ("\\x1b", "\\n", etc.) into bytes."""
+    def _decode_raw_text(content: str, code_page: Optional[str] = None) -> bytes:
+        """Decode literal escape sequences and emit bytes for the chosen code page."""
 
+        encoding = (code_page or "cp437").lower()
         try:
             decoded = content.encode("utf-8").decode("unicode_escape")
-            return decoded.encode("cp437", errors="replace")
+            payload = decoded.encode(encoding, errors="replace")
+            prefix = PrintProcessor._code_page_command(encoding)
+            return prefix + payload if prefix else payload
+        except LookupError as exc:  # Unknown codec
+            raise PrinterError(f"Code page no soportada: {encoding}") from exc
         except Exception as exc:  # noqa: BLE001
             raise PrinterError("No se pudo decodificar raw_text") from exc
+
+    @staticmethod
+    def _code_page_command(encoding: str) -> bytes:
+        """Return the ESC t n sequence for common code pages if known."""
+
+        mapping = {
+            "cp437": 0,
+            "437": 0,
+            "cp850": 2,
+            "850": 2,
+            "cp852": 18,
+            "852": 18,
+            "cp858": 19,
+            "858": 19,
+            "cp1252": 16,
+            "windows-1252": 16,
+            "latin-1": 16,
+            "iso-8859-1": 16,
+        }
+        if encoding not in mapping:
+            return b""
+        return bytes([0x1B, 0x74, mapping[encoding]])
 
     @staticmethod
     def _decode_image(data: str) -> Image.Image:

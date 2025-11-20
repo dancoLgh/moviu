@@ -23,6 +23,10 @@ class PrintRequest(BaseModel):
     mode: str = Field("html", description="html | image | raw | raw_text")
     content: str = Field(..., description="Payload del trabajo")
     printer: Optional[PrinterSettings] = None
+    code_page: Optional[str] = Field(
+        None,
+        description="Code page a usar para raw_text (p.ej. cp437, cp850, cp858, cp1252)",
+    )
 
 
 class PrintResponse(BaseModel):
@@ -49,6 +53,7 @@ def create_api(config: AppConfig) -> FastAPI:
             content=request.content,
             printer_host=printer_host or config.printer_host,
             printer_port=printer_port or config.printer_port,
+            code_page=request.code_page,
         )
         try:
             result = processor.process(job)
