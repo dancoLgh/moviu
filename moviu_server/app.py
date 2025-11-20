@@ -11,6 +11,10 @@ import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox
+from typing import Callable
+
+import pystray
+from PIL import Image, ImageDraw, ImageFont
 
 import uvicorn
 
@@ -125,6 +129,10 @@ class DesktopApp:
         self._maximize_window()
         self._configure_window_hooks()
         self._register_signal_handlers()
+        self.tray = SystemTray(
+            on_show=self._restore_from_tray,
+            on_exit=lambda: self.root.after(0, self._do_exit),
+        )
         self._apply_autostart(self.config.auto_start, notify=False)
 
     def _build_ui(self) -> None:
@@ -252,17 +260,36 @@ class DesktopApp:
 
     def _do_exit(self) -> None:
         self.stop_server()
+        self.tray.stop()
         self.root.destroy()
 
     def _minimize_to_background(self) -> None:
-        """Hide the window instead of closing it so the app keeps running."""
+        """Send the window to the system tray instead of closing it."""
 
         try:
-            self.root.iconify()
-        except Exception:
-            # As a fallback, withdraw removes the window from the screen/taskbar
             self.root.withdraw()
-        logging.info("Ventana minimizada; la aplicación continúa en segundo plano")
+        except Exception:
+            try:
+                self.root.iconify()
+            except Exception:
+                logging.debug("No se pudo ocultar la ventana; se mantendrá visible")
+                return
+
+        self.tray.start()
+        logging.info("Ventana enviada a la bandeja del sistema; el servidor sigue activo")
+
+    def _restore_from_tray(self) -> None:
+        def _show() -> None:
+            self.tray.stop()
+            try:
+                self.root.deiconify()
+                self.root.state("normal")
+                self.root.lift()
+                self.root.focus_force()
+            except Exception:
+                logging.debug("No se pudo restaurar la ventana desde la bandeja")
+
+        self.root.after(0, _show)
 
     def generate_certs(self) -> None:
         cert_path, key_path = ensure_certificates(
@@ -406,6 +433,52 @@ class _TextHandler(logging.Handler):
         self.widget.insert(tk.END, msg + "\n")
         self.widget.see(tk.END)
         self.widget.configure(state="disabled")
+
+
+class SystemTray:
+    """Lightweight system tray controller to restore or exit the app."""
+
+    def __init__(self, on_show: Callable[[], None], on_exit: Callable[[], None]) -> None:
+        self.on_show = on_show
+        self.on_exit = on_exit
+        self.icon: pystray.Icon | None = None
+
+    def start(self) -> None:
+        if self.icon and self.icon.visible:
+            return
+
+        image = self._create_image()
+        menu = pystray.Menu(
+            pystray.MenuItem("Mostrar", self._handle_show),
+            pystray.MenuItem("Salir", self._handle_exit),
+        )
+        self.icon = pystray.Icon("moviu_print_server", image, "Moviu Print Server", menu)
+        self.icon.run_detached()
+
+    def stop(self) -> None:
+        if self.icon:
+            self.icon.stop()
+            self.icon = None
+
+    def _handle_show(self, _icon: pystray.Icon, _item: pystray.MenuItem) -> None:
+        self.on_show()
+
+    def _handle_exit(self, _icon: pystray.Icon, _item: pystray.MenuItem) -> None:
+        self.stop()
+        self.on_exit()
+
+    def _create_image(self) -> Image.Image:
+        size = 64
+        image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(image)
+        draw.rounded_rectangle((6, 6, size - 6, size - 6), radius=12, fill=(24, 79, 254, 255))
+        font = ImageFont.load_default()
+        text = "M"
+        bbox = draw.textbbox((0, 0), text, font=font)
+        text_w = bbox[2] - bbox[0]
+        text_h = bbox[3] - bbox[1]
+        draw.text(((size - text_w) / 2, (size - text_h) / 2), text, font=font, fill="white")
+        return image
 
 
 def _ensure_streams() -> None:
