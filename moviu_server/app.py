@@ -55,6 +55,61 @@ class ServerController:
         self.server = None
         self.thread = None
 
+    def _log_config(self) -> dict:
+        log_file = certificates_folder() / "app.log"
+        stream = sys.stdout or sys.__stdout__
+        if stream is None:
+            stream = open(os.devnull, "w", encoding="utf-8")
+
+        return {
+            "version": 1,
+            "disable_existing_loggers": False,
+            "formatters": {
+                "default": {
+                    "()": "logging.Formatter",
+                    "fmt": "%(asctime)s [%(levelname)s] %(message)s",
+                    "datefmt": "%Y-%m-%d %H:%M:%S",
+                },
+                "access": {
+                    "()": "logging.Formatter",
+                    "fmt": "%(asctime)s [%(levelname)s] %(client_addr)s - \"%(request_line)s\" %(status_code)s",
+                    "datefmt": "%Y-%m-%d %H:%M:%S",
+                },
+            },
+            "handlers": {
+                "default": {
+                    "formatter": "default",
+                    "class": "logging.StreamHandler",
+                    "stream": stream,
+                },
+                "file": {
+                    "formatter": "default",
+                    "class": "logging.FileHandler",
+                    "filename": str(log_file),
+                    "mode": "a",
+                    "encoding": "utf-8",
+                },
+                "access": {
+                    "formatter": "access",
+                    "class": "logging.StreamHandler",
+                    "stream": stream,
+                },
+            },
+            "loggers": {
+                "uvicorn": {"handlers": ["default", "file"], "level": "INFO", "propagate": False},
+                "uvicorn.error": {
+                    "handlers": ["default", "file"],
+                    "level": "INFO",
+                    "propagate": False,
+                },
+                "uvicorn.access": {
+                    "handlers": ["access", "file"],
+                    "level": "INFO",
+                    "propagate": False,
+                },
+            },
+        }
+
 
 class DesktopApp:
     def __init__(self) -> None:
@@ -237,7 +292,7 @@ class DesktopApp:
     def run(self) -> None:
         self.root.mainloop()
 
-def _setup_logging(self) -> None:
+    def _setup_logging(self) -> None:
         log_file = certificates_folder() / "app.log"
         log_file.parent.mkdir(parents=True, exist_ok=True)
         logging.basicConfig(
@@ -252,61 +307,6 @@ def _setup_logging(self) -> None:
         formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
         self.log_handler.setFormatter(formatter)
         logging.getLogger().addHandler(self.log_handler)
-
-def _log_config(self) -> dict:
-        log_file = certificates_folder() / "app.log"
-        stream = sys.stdout or sys.__stdout__
-        if stream is None:
-            stream = open(os.devnull, "w", encoding="utf-8")
-
-        return {
-            "version": 1,
-            "disable_existing_loggers": False,
-            "formatters": {
-                "default": {
-                    "()": "logging.Formatter",
-                    "fmt": "%(asctime)s [%(levelname)s] %(message)s",
-                    "datefmt": "%Y-%m-%d %H:%M:%S",
-                },
-                "access": {
-                    "()": "logging.Formatter",
-                    "fmt": "%(asctime)s [%(levelname)s] %(client_addr)s - \"%(request_line)s\" %(status_code)s",
-                    "datefmt": "%Y-%m-%d %H:%M:%S",
-                },
-            },
-            "handlers": {
-                "default": {
-                    "formatter": "default",
-                    "class": "logging.StreamHandler",
-                    "stream": stream,
-                },
-                "file": {
-                    "formatter": "default",
-                    "class": "logging.FileHandler",
-                    "filename": str(log_file),
-                    "mode": "a",
-                    "encoding": "utf-8",
-                },
-                "access": {
-                    "formatter": "access",
-                    "class": "logging.StreamHandler",
-                    "stream": stream,
-                },
-            },
-            "loggers": {
-                "uvicorn": {"handlers": ["default", "file"], "level": "INFO", "propagate": False},
-                "uvicorn.error": {
-                    "handlers": ["default", "file"],
-                    "level": "INFO",
-                    "propagate": False,
-                },
-                "uvicorn.access": {
-                    "handlers": ["access", "file"],
-                    "level": "INFO",
-                    "propagate": False,
-                },
-            },
-        }
 
 
 class _TextHandler(logging.Handler):
