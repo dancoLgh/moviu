@@ -28,7 +28,7 @@ pip install -r requirements.txt
    ```
 2. Configura host, puerto, datos de la impresora y guarda.
 3. Opcional: genera/descarga el certificado SSL desde los botones "Generar certificados" y "Exportar certificado".
-4. Si quieres evitar envíos reales durante el desarrollo, activa "Simular impresora (solo desarrollo)" para que los trabajos se escriban en `~/.moviu_printer/simulated_job.bin`.
+4. Si quieres evitar envíos reales durante el desarrollo, activa "Simular impresora (solo desarrollo)" para que los trabajos se guarden en `~/.moviu_printer/simulated_jobs/` con una copia binaria (`.bin`) y, cuando aplique, una vista previa en texto (`.txt`/`.hex`) o imagen (`.png`). El log indica la ruta de cada trabajo simulado.
 5. Inicia el servidor desde la propia interfaz. La API key se muestra en la ventana y el log en la parte inferior.
 
 ### Endpoint principal
@@ -81,6 +81,54 @@ El modo `raw_text` interpreta las secuencias de escape (\n, \t, \x1b, etc.) sin 
 ```
 
 Code pages soportadas para `raw_text`: `cp437` (ESC t 0), `cp850` (ESC t 2), `cp860` (ESC t 3), `cp863` (ESC t 4), `cp865` (ESC t 5), `cp1252`/`latin-1` (ESC t 6), `cp866` (ESC t 7), `cp852` (ESC t 8) y `cp858` (ESC t 9). Si pasas una no soportada, la API devuelve error de validación.
+
+## Generar instaladores
+
+### Windows (ejecutable .exe)
+
+1. Instala PyInstaller (solo para empaquetar):
+   ```powershell
+   pip install pyinstaller
+   ```
+2. Genera el ejecutable:
+   ```powershell
+   pyinstaller --noconfirm --noconsole --onefile --name MoviuPrintServer main.py
+   ```
+3. El binario queda en `dist/MoviuPrintServer.exe`. Copia todo el directorio `dist/` al equipo destino; al arrancar, la app crea `~/.moviu_printer/` con la configuración y certificados.
+
+### Debian/Ubuntu (.deb)
+
+1. Instala dependencias de build (solo una vez):
+   ```bash
+   sudo apt-get update && sudo apt-get install -y python3-venv python3-dev build-essential debhelper
+   pip install pyinstaller
+   ```
+2. Crea el binario autónomo:
+   ```bash
+   pyinstaller --noconfirm --noconsole --onefile --name moviu-print-server main.py
+   ```
+3. Arma la estructura del paquete:
+   ```bash
+   mkdir -p dist/deb/DEBIAN dist/deb/usr/local/bin
+   cp dist/moviu-print-server dist/deb/usr/local/bin/moviu-print-server
+   cat > dist/deb/DEBIAN/control <<'EOF'
+   Package: moviu-print-server
+   Version: 1.0.0
+   Section: utils
+   Priority: optional
+   Architecture: amd64
+   Maintainer: moviu
+   Description: Servidor local de impresión ESC/POS con API HTTPS y app Tkinter
+   EOF
+   ```
+4. Genera el .deb:
+   ```bash
+   dpkg-deb --build dist/deb dist/moviu-print-server.deb
+   ```
+5. Instala en la máquina destino:
+   ```bash
+   sudo dpkg -i dist/moviu-print-server.deb
+   ```
 
 ## Seguridad
 

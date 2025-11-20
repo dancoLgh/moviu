@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import base64
 import io
+import logging
 import re
 import socket
+from datetime import datetime
 from dataclasses import dataclass
 from typing import Literal, Optional
 
@@ -39,9 +41,9 @@ class PrintProcessor:
         self.simulate = simulate
 
     def process(self, job: PrintJob) -> dict:
-        payload = self._build_payload(job)
+        payload, preview = self._build_payload(job)
         if self.simulate:
-            self._simulate_output(payload)
+            self._simulate_output(job, payload, preview)
             status = "simulated"
         else:
             self._send_to_printer(payload, job.printer_host, job.printer_port)
@@ -53,18 +55,25 @@ class PrintProcessor:
             "bytes": len(payload),
         }
 
-    def _build_payload(self, job: PrintJob) -> bytes:
+    def _build_payload(self, job: PrintJob) -> tuple[bytes, dict]:
+        preview: dict = {}
         if job.mode == "raw_text":
-            return self._decode_raw_text(job.content, job.code_page)
+            payload, text_preview = self._decode_raw_text(job.content, job.code_page)
+            preview = {"text": text_preview, "encoding": (job.code_page or "cp858").lower()}
+            return payload, preview
         if job.mode == "raw":
-            return self._decode_raw(job.content)
+            payload = self._decode_raw(job.content)
+            preview = {"hex": payload.hex()}
+            return payload, preview
         if job.mode == "image":
             image = self._decode_image(job.content)
+            preview = {"image": image}
         elif job.mode == "html":
             image = html_to_image(job.content)
+            preview = {"image": image, "html": job.content}
         else:
             raise PrinterError(f"Modo no soportado: {job.mode}")
-        return image_to_escpos(image)
+        return image_to_escpos(image), preview
 
     @staticmethod
     def _decode_raw(content: str) -> bytes:
@@ -83,7 +92,7 @@ class PrintProcessor:
             ) from exc
 
     @staticmethod
-    def _decode_raw_text(content: str, code_page: Optional[str] = None) -> bytes:
+    def _decode_raw_text(content: str, code_page: Optional[str] = None) -> tuple[bytes, str]:
         r"""Decode \xNN escapes + newlines without mangling accented characters."""
 
         encoding = (code_page or "cp858").lower()
@@ -105,7 +114,7 @@ class PrintProcessor:
 
             # 4) Prefix ESC t n to set the printer code page
             prefix = PrintProcessor._code_page_command(encoding)
-            return prefix + payload if prefix else payload
+            return (prefix + payload if prefix else payload), text
         except LookupError as exc:  # Unknown codec
             raise PrinterError(f"Code page no soportada: {encoding}") from exc
         except Exception as exc:  # noqa: BLE001
@@ -169,8 +178,40 @@ class PrintProcessor:
                 f"No se pudo enviar el trabajo a {target_host}:{target_port}: {exc}"
             ) from exc
 
-    def _simulate_output(self, payload: bytes) -> None:
-        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        output = CONFIG_DIR / "simulated_job.bin"
-        with output.open("ab") as fh:
-            fh.write(payload + b"\n---\n")
+    def _simulate_output(self, job: PrintJob, payload: bytes, preview: dict) -> None:
+        jobs_dir = CONFIG_DIR / "simulated_jobs"
+        jobs_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        base = jobs_dir / f"job-{timestamp}"
+
+        payload_path = base.with_suffix(".bin")
+        payload_path.write_bytes(payload)
+
+        summary_lines = [
+            f"Modo: {job.mode}",
+            f"Host: {job.printer_host or self.default_host}",
+            f"Puerto: {job.printer_port or self.default_port}",
+            f"Bytes: {len(payload)}",
+        ]
+
+        if "text" in preview:
+            text_path = base.with_suffix(".txt")
+            text_path.write_text(preview["text"], encoding="utf-8")
+            summary_lines.append(f"Vista previa texto: {text_path}")
+        if "hex" in preview:
+            hex_path = base.with_suffix(".hex")
+            hex_path.write_text(preview["hex"], encoding="utf-8")
+            summary_lines.append(f"Hex dump: {hex_path}")
+        if "html" in preview:
+            html_path = base.with_suffix(".html")
+            html_path.write_text(preview["html"], encoding="utf-8")
+            summary_lines.append(f"HTML recibido: {html_path}")
+        if "image" in preview:
+            image_path = base.with_suffix(".png")
+            try:
+                preview["image"].save(image_path)
+                summary_lines.append(f"Previsualización: {image_path}")
+            except Exception as exc:  # noqa: BLE001
+                logging.warning("No se pudo guardar la vista previa de imagen: %s", exc)
+        summary = " | ".join(summary_lines)
+        logging.info("Trabajo simulado guardado en %s (%s)", payload_path, summary)
