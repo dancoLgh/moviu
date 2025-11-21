@@ -106,15 +106,25 @@ class PrinterServer:
         with client:
             logger.info("Conexión entrante de %s:%d", address[0], address[1])
             buffer = bytearray()
-            while True:
-                chunk = client.recv(4096)
-                if not chunk:
-                    break
-                buffer.extend(chunk)
-            if buffer:
-                send_raw_to_printer(self.printer_name, bytes(buffer))
+            try:
+                while True:
+                    chunk = client.recv(4096)
+                    if not chunk:
+                        break
+                    buffer.extend(chunk)
+            except ConnectionResetError:
+                logger.info(
+                    "El cliente %s:%d interrumpió la conexión de forma abrupta (reset)",
+                    address[0],
+                    address[1],
+                )
+            except OSError:
+                logger.exception("Error recibiendo datos de %s:%d", address[0], address[1])
             else:
-                logger.info("La conexión de %s:%d no envió datos", address[0], address[1])
+                if buffer:
+                    send_raw_to_printer(self.printer_name, bytes(buffer))
+                else:
+                    logger.info("La conexión de %s:%d no envió datos", address[0], address[1])
 
         if self.status_callback:
             self.status_callback(f"Último cliente: {address[0]}:{address[1]}")
