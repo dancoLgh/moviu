@@ -10,6 +10,7 @@ Servidor de impresión local para convertir HTML → imagen → ESC/POS y expone
 - Permite enviar comandos ESC/POS sin transformación (`mode="raw"` o `mode="raw_text"`).
 - Enrutamiento a impresoras de red vía TCP configurable por petición.
 - Modo de simulación de impresora que guarda los trabajos en disco y devuelve vistas previas para entornos de desarrollo.
+- Puente TCP → USB integrado para reenviar bytes recibidos por red a una impresora USB de Windows.
 
 ## Requisitos
 
@@ -154,6 +155,6 @@ MIT
 
 ---
 
-## Utilidad adicional: puente TCP → impresora USB
+## Puente TCP → impresora USB
 
-En `tcp_usb_bridge/` se incluye una herramienta independiente que recibe bytes por TCP y los envía a una impresora USB instalada en Windows. La interfaz Tkinter permite elegir impresora, puerto de escucha y activar el inicio automático. Consulta el archivo [`tcp_usb_bridge/README.md`](tcp_usb_bridge/README.md) para instrucciones de desarrollo, empaquetado a .exe y arranque en segundo plano.
+En la propia aplicación encontrarás el apartado **"Puente TCP → Impresora USB"** para activar o detener el listener. Selecciona la impresora USB instalada en Windows, el puerto TCP de escucha y marca **"Arrancar puente automáticamente"** si quieres que se levante al iniciar Moviu. En sistemas no Windows los trabajos se guardan como simulaciones en `~/.tcp_usb_bridge/` para poder probar el flujo sin hardware real.
