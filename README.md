@@ -5,6 +5,7 @@ Servidor de impresión local para convertir HTML → imagen → ESC/POS y expone
 ## Características
 
 - Aplicación de escritorio (Tkinter) que inicia/detiene el servidor con visor de logs.
+- Bridge TCP→USB integrado para compartir impresoras USB como si fueran TCP.
 - API REST (`FastAPI`) accesible mediante `X-API-Key` y servido sobre HTTPS con certificados autogenerados.
 - Convierte HTML plano o imágenes base64 en comandos ESC/POS listos para impresoras térmicas.
 - Permite enviar comandos ESC/POS sin transformación (`mode="raw"` o `mode="raw_text"`).
@@ -26,9 +27,10 @@ pip install -r requirements.txt
    python main.py
    ```
 2. Configura host, puerto, datos de la impresora y guarda.
-3. Opcional: genera/descarga el certificado SSL desde los botones "Generar certificados" y "Exportar certificado".
-4. Si quieres evitar envíos reales durante el desarrollo, activa "Simular impresora (solo desarrollo)" para que los trabajos se guarden en `~/.moviu_printer/simulated_jobs/` con una copia binaria (`.bin`) y, cuando aplique, una vista previa en texto (`.txt`/`.hex`) o imagen (`.png`). El log indica la ruta de cada trabajo simulado y el botón "Abrir simulaciones" abre la carpeta. La respuesta de la API también incluirá un bloque `preview` con texto/HTML/hex y la imagen en base64 cuando la simulación esté activa.
-5. Inicia el servidor desde la propia interfaz. La API key se muestra en la ventana y el log en la parte inferior.
+3. Activa el bridge TCP→USB si quieres exponer una impresora conectada por USB en un puerto TCP local. Define el puerto y la ruta del dispositivo (por ejemplo `/dev/usb/lp0` en Linux).
+4. Opcional: genera/descarga el certificado SSL desde los botones "Generar certificados" y "Exportar certificado".
+5. Si quieres evitar envíos reales durante el desarrollo, activa "Simular impresora (solo desarrollo)" para que los trabajos se guarden en `~/.moviu_printer/simulated_jobs/` con una copia binaria (`.bin`) y, cuando aplique, una vista previa en texto (`.txt`/`.hex`) o imagen (`.png`). El log indica la ruta de cada trabajo simulado y el botón "Abrir simulaciones" abre la carpeta. La respuesta de la API también incluirá un bloque `preview` con texto/HTML/hex y la imagen en base64 cuando la simulación esté activa.
+6. Inicia el servidor desde la propia interfaz. La API key se muestra en la ventana y el log en la parte inferior.
 
 ### Endpoint principal
 

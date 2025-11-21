@@ -23,6 +23,9 @@ class AppConfig:
     printer_port: int = 9100
     simulate_printer: bool = False
     auto_start: bool = False
+    usb_bridge_enabled: bool = False
+    usb_bridge_port: int = 9200
+    usb_device_path: str = "/dev/usb/lp0"
     ssl_cert_path: str = str(CONFIG_DIR / "cert.pem")
     ssl_key_path: str = str(CONFIG_DIR / "key.pem")
 
@@ -37,6 +40,9 @@ class AppConfig:
             printer_port=int(data.get("printer_port", cls.printer_port)),
             simulate_printer=bool(data.get("simulate_printer", cls.simulate_printer)),
             auto_start=bool(data.get("auto_start", cls.auto_start)),
+            usb_bridge_enabled=bool(data.get("usb_bridge_enabled", cls.usb_bridge_enabled)),
+            usb_bridge_port=int(data.get("usb_bridge_port", cls.usb_bridge_port)),
+            usb_device_path=data.get("usb_device_path", cls.usb_device_path),
             ssl_cert_path=data.get("ssl_cert_path", str(cls.ssl_cert_path)),
             ssl_key_path=data.get("ssl_key_path", str(cls.ssl_key_path)),
         )

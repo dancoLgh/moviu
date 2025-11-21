@@ -10,7 +10,7 @@ import sys
 import threading
 import tkinter as tk
 from pathlib import Path
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 from typing import Callable
 
 import pystray
@@ -22,6 +22,7 @@ from .autostart import configure_autostart
 from .certs import certificates_folder, ensure_certificates, export_certificate
 from .config import AppConfig, CONFIG_DIR, load_config, save_config
 from .server import create_api
+from .tcp_usb_bridge import BridgeConfig, TcpUsbBridge
 
 
 class ServerController:
@@ -123,6 +124,13 @@ class DesktopApp:
         self.root.title("Moviu Print Server")
         self.config = load_config()
         self.controller = ServerController(self.config)
+        self.bridge = TcpUsbBridge(
+            BridgeConfig(
+                host=self.config.host,
+                port=self.config.usb_bridge_port,
+                device_path=Path(self.config.usb_device_path),
+            )
+        )
         _ensure_streams()
         self._setup_logging()
         self._build_ui()
@@ -136,7 +144,8 @@ class DesktopApp:
         self._apply_autostart(self.config.auto_start, notify=False)
 
     def _build_ui(self) -> None:
-        frame = tk.Frame(self.root, padx=10, pady=10)
+        self._apply_style()
+        frame = ttk.Frame(self.root, padding=16)
         frame.pack(fill=tk.BOTH, expand=True)
 
         self.host_var = tk.StringVar(value=self.config.host)
@@ -146,78 +155,148 @@ class DesktopApp:
         self.api_key_var = tk.StringVar(value=self.config.api_key)
         self.simulate_var = tk.BooleanVar(value=self.config.simulate_printer)
         self.auto_start_var = tk.BooleanVar(value=self.config.auto_start)
+        self.usb_bridge_enabled_var = tk.BooleanVar(value=self.config.usb_bridge_enabled)
+        self.usb_bridge_port_var = tk.StringVar(value=str(self.config.usb_bridge_port))
+        self.usb_device_path_var = tk.StringVar(value=self.config.usb_device_path)
 
-        row = 0
-        for label, var in (
-            ("Host servidor", self.host_var),
-            ("Puerto servidor", self.port_var),
-            ("Printer host", self.printer_host_var),
-            ("Printer puerto", self.printer_port_var),
-        ):
-            tk.Label(frame, text=label).grid(row=row, column=0, sticky="w")
-            tk.Entry(frame, textvariable=var).grid(row=row, column=1, sticky="ew")
-            row += 1
-
-        frame.columnconfigure(1, weight=1)
-
-        tk.Label(frame, text="API Key").grid(row=row, column=0, sticky="w")
-        tk.Entry(frame, textvariable=self.api_key_var, state="readonly").grid(
-            row=row, column=1, sticky="ew"
+        header = ttk.Frame(frame)
+        header.pack(fill=tk.X, pady=(0, 12))
+        title = ttk.Label(
+            header,
+            text="Moviu Print Server",
+            style="Title.TLabel",
         )
-        row += 1
+        title.pack(side=tk.LEFT)
+        subtitle = ttk.Label(
+            header,
+            text="API segura + Bridge TCP→USB en una sola app",
+            style="SubTitle.TLabel",
+        )
+        subtitle.pack(side=tk.LEFT, padx=(10, 0))
 
-        tk.Checkbutton(
-            frame,
+        sections = ttk.Frame(frame)
+        sections.pack(fill=tk.BOTH, expand=True)
+        sections.columnconfigure(0, weight=1)
+        sections.columnconfigure(1, weight=1)
+
+        api_frame = self._build_section(sections, "Servidor HTTPS")
+        api_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        self._add_labeled_entry(api_frame, "Host servidor", self.host_var, 0)
+        self._add_labeled_entry(api_frame, "Puerto servidor", self.port_var, 1)
+        self._add_labeled_entry(api_frame, "API Key", self.api_key_var, 2, readonly=True)
+        ttk.Button(api_frame, text="Regenerar API Key", command=self.regenerate_api_key).grid(
+            row=3, column=0, columnspan=2, sticky="ew", pady=(8, 0)
+        )
+        ttk.Checkbutton(
+            api_frame,
             text="Simular impresora (solo desarrollo)",
             variable=self.simulate_var,
-            onvalue=True,
-            offvalue=False,
-        ).grid(row=row, column=0, columnspan=2, sticky="w")
-        row += 1
-
-        tk.Checkbutton(
-            frame,
+        ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        ttk.Checkbutton(
+            api_frame,
             text="Ejecutar al iniciar el sistema",
             variable=self.auto_start_var,
-            onvalue=True,
-            offvalue=False,
-        ).grid(row=row, column=0, columnspan=2, sticky="w")
-        row += 1
+        ).grid(row=5, column=0, columnspan=2, sticky="w")
 
-        btn_frame = tk.Frame(frame)
-        btn_frame.grid(row=row, column=0, columnspan=2, pady=10)
-        tk.Button(btn_frame, text="Guardar", command=self.save_settings).pack(side=tk.LEFT, padx=5)
-        tk.Button(btn_frame, text="Regenerar API Key", command=self.regenerate_api_key).pack(
+        printer_frame = self._build_section(sections, "Impresora TCP")
+        printer_frame.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
+        self._add_labeled_entry(printer_frame, "Host impresora", self.printer_host_var, 0)
+        self._add_labeled_entry(printer_frame, "Puerto impresora", self.printer_port_var, 1)
+        ttk.Label(
+            printer_frame,
+            text="Estos valores son el destino por defecto; cada petición puede enviar sus propios host/puerto.",
+            style="Hint.TLabel",
+            wraplength=280,
+            justify="left",
+        ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(6, 0))
+
+        bridge_frame = self._build_section(frame, "Bridge TCP → USB")
+        bridge_frame.pack(fill=tk.X, pady=(12, 0))
+        ttk.Checkbutton(
+            bridge_frame,
+            text="Activar bridge TCP→USB integrado",
+            variable=self.usb_bridge_enabled_var,
+            command=self._sync_bridge,
+        ).grid(row=0, column=0, columnspan=2, sticky="w")
+        self._add_labeled_entry(bridge_frame, "Puerto bridge", self.usb_bridge_port_var, 1)
+        self._add_labeled_entry(bridge_frame, "Ruta dispositivo USB", self.usb_device_path_var, 2)
+        ttk.Label(
+            bridge_frame,
+            text="Ejemplo: /dev/usb/lp0 en Linux o LPT1 en Windows con drivers instalados.",
+            style="Hint.TLabel",
+            wraplength=500,
+            justify="left",
+        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(6, 0))
+
+        actions = ttk.Frame(frame)
+        actions.pack(fill=tk.X, pady=12)
+        ttk.Button(actions, text="Guardar", command=self.save_settings).pack(side=tk.LEFT, padx=5)
+        ttk.Button(actions, text="Iniciar", command=self.start_server).pack(side=tk.LEFT, padx=5)
+        ttk.Button(actions, text="Detener", command=self.stop_server).pack(side=tk.LEFT, padx=5)
+        ttk.Button(actions, text="Generar certificados", command=self.generate_certs).pack(
             side=tk.LEFT, padx=5
         )
-        tk.Button(btn_frame, text="Iniciar", command=self.start_server).pack(side=tk.LEFT, padx=5)
-        tk.Button(btn_frame, text="Detener", command=self.stop_server).pack(side=tk.LEFT, padx=5)
-        tk.Button(btn_frame, text="Generar certificados", command=self.generate_certs).pack(
+        ttk.Button(actions, text="Exportar certificado", command=self.export_cert).pack(
             side=tk.LEFT, padx=5
         )
-        tk.Button(btn_frame, text="Exportar certificado", command=self.export_cert).pack(
-            side=tk.LEFT, padx=5
-        )
-        tk.Button(btn_frame, text="Abrir simulaciones", command=self.open_simulations).pack(
+        ttk.Button(actions, text="Abrir simulaciones", command=self.open_simulations).pack(
             side=tk.LEFT, padx=5
         )
 
+        status_frame = ttk.Frame(frame)
+        status_frame.pack(fill=tk.X)
         self.status_var = tk.StringVar(value="Servidor detenido")
-        tk.Label(frame, textvariable=self.status_var, fg="blue").grid(
-            row=row + 1, column=0, columnspan=2, sticky="w"
+        self.bridge_status_var = tk.StringVar(value="Bridge desactivado")
+        ttk.Label(status_frame, textvariable=self.status_var, style="Status.TLabel").pack(
+            anchor="w"
+        )
+        ttk.Label(status_frame, textvariable=self.bridge_status_var, style="Status.TLabel").pack(
+            anchor="w"
         )
 
-        log_frame = tk.LabelFrame(frame, text="Log")
-        log_frame.grid(row=row + 2, column=0, columnspan=2, sticky="nsew", pady=10)
-        frame.rowconfigure(row + 2, weight=1)
-        log_frame.rowconfigure(0, weight=1)
+        log_frame = self._build_section(frame, "Log")
+        log_frame.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
         log_frame.columnconfigure(0, weight=1)
-        self.log_widget = tk.Text(log_frame, height=10, state="disabled")
+        log_frame.rowconfigure(0, weight=1)
+        self.log_widget = tk.Text(log_frame, height=10, state="disabled", bg="#0f172a", fg="#e2e8f0")
         self.log_widget.grid(row=0, column=0, sticky="nsew")
-        scrollbar = tk.Scrollbar(log_frame, command=self.log_widget.yview)
+        scrollbar = ttk.Scrollbar(log_frame, command=self.log_widget.yview)
         scrollbar.grid(row=0, column=1, sticky="ns")
         self.log_widget.configure(yscrollcommand=scrollbar.set)
         self.log_handler.attach(self.log_widget)
+
+    def _apply_style(self) -> None:
+        style = ttk.Style(self.root)
+        try:
+            style.theme_use("clam")
+        except Exception:
+            pass
+        style.configure("TFrame", background="#0b1220")
+        style.configure("TLabel", background="#0b1220", foreground="#e2e8f0")
+        style.configure("Hint.TLabel", foreground="#94a3b8", background="#0b1220")
+        style.configure("Title.TLabel", font=("Segoe UI", 16, "bold"), foreground="#38bdf8")
+        style.configure("SubTitle.TLabel", font=("Segoe UI", 10), foreground="#cbd5e1")
+        style.configure("Status.TLabel", foreground="#38bdf8", background="#0b1220")
+        style.configure("TButton", padding=6)
+        style.configure("Section.TLabelframe", background="#111827", borderwidth=1)
+        style.configure("Section.TLabelframe.Label", background="#111827", foreground="#a5b4fc")
+        style.configure("TCheckbutton", background="#0b1220", foreground="#e2e8f0")
+        self.root.configure(bg="#0b1220")
+
+    def _build_section(self, parent: ttk.Frame, title: str) -> ttk.LabelFrame:
+        section = ttk.LabelFrame(parent, text=title, padding=12, style="Section.TLabelframe")
+        section.columnconfigure(1, weight=1)
+        return section
+
+    def _add_labeled_entry(
+        self, parent: ttk.Frame, label: str, var: tk.Variable, row: int, readonly: bool = False
+    ) -> None:
+        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=2)
+        entry_state = "readonly" if readonly else "normal"
+        entry = ttk.Entry(parent, textvariable=var, state=entry_state)
+        entry.grid(row=row, column=1, sticky="ew", pady=2)
+        if readonly:
+            entry.configure(cursor="arrow")
 
     def save_settings(self, notify: bool = True) -> None:
         try:
@@ -227,8 +306,12 @@ class DesktopApp:
             self.config.printer_port = int(self.printer_port_var.get())
             self.config.simulate_printer = self.simulate_var.get()
             self.config.auto_start = self.auto_start_var.get()
+            self.config.usb_bridge_enabled = self.usb_bridge_enabled_var.get()
+            self.config.usb_bridge_port = int(self.usb_bridge_port_var.get())
+            self.config.usb_device_path = self.usb_device_path_var.get()
             save_config(self.config)
             self._apply_autostart(self.config.auto_start)
+            self._sync_bridge()
             if notify:
                 messagebox.showinfo("Configuración", "Configuración guardada")
             logging.info("Configuración guardada")
@@ -257,6 +340,8 @@ class DesktopApp:
         self.controller.stop()
         self.status_var.set("Servidor detenido")
         logging.info("Servidor detenido")
+        self.bridge.stop()
+        self.bridge_status_var.set("Bridge desactivado")
 
     def _do_exit(self) -> None:
         self.stop_server()
@@ -408,6 +493,25 @@ class DesktopApp:
             if notify:
                 estado = "activado" if enabled else "desactivado"
                 logging.info("Autoinicio %s", estado)
+
+    def _sync_bridge(self) -> None:
+        try:
+            bridge_port = int(self.usb_bridge_port_var.get())
+        except ValueError:
+            self.bridge_status_var.set("Bridge: puerto inválido")
+            return
+
+        self.bridge.update_config(
+            self.host_var.get(), bridge_port, self.usb_device_path_var.get()
+        )
+        if self.usb_bridge_enabled_var.get():
+            self.bridge.restart(enabled=True)
+            self.bridge_status_var.set(
+                f"Bridge TCP→USB activo en tcp://{self.host_var.get()}:{bridge_port} → {self.usb_device_path_var.get()}"
+            )
+        else:
+            self.bridge.stop()
+            self.bridge_status_var.set("Bridge desactivado")
 
 
 class _TextHandler(logging.Handler):
