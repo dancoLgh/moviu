@@ -151,3 +151,9 @@ Code pages soportadas para `raw_text`: `cp437` (ESC t 0), `cp850` (ESC t 2), `cp
 ## Licencia
 
 MIT
+
+---
+
+## Utilidad adicional: puente TCP → impresora USB
+
+En `tcp_usb_bridge/` se incluye una herramienta independiente que recibe bytes por TCP y los envía a una impresora USB instalada en Windows. La interfaz Tkinter permite elegir impresora, puerto de escucha y activar el inicio automático. Consulta el archivo [`tcp_usb_bridge/README.md`](tcp_usb_bridge/README.md) para instrucciones de desarrollo, empaquetado a .exe y arranque en segundo plano.
