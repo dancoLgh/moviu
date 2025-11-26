@@ -35,9 +35,10 @@ class PrinterError(RuntimeError):
 class PrintProcessor:
     """Handle conversions and network transmission."""
 
-    def __init__(self, default_host: str, default_port: int, simulate: bool = False) -> None:
+    def __init__(self, default_host: str, default_port: int, width: int = 576, simulate: bool = False) -> None:
         self.default_host = default_host
         self.default_port = default_port
+        self.width = width
         self.simulate = simulate
 
     def process(self, job: PrintJob, simulate_override: Optional[bool] = None) -> dict:
@@ -74,9 +75,14 @@ class PrintProcessor:
             return payload, preview
         if job.mode == "image":
             image = self._decode_image(job.content)
+            # Resize if needed to fit printer width
+            if image.width > self.width:
+                ratio = self.width / image.width
+                new_height = int(image.height * ratio)
+                image = image.resize((self.width, new_height), Image.Resampling.LANCZOS)
             preview = {"image": image}
         elif job.mode == "html":
-            image = html_to_image(job.content)
+            image = html_to_image(job.content, width=self.width)
             preview = {"image": image, "html": job.content}
         else:
             raise PrinterError(f"Modo no soportado: {job.mode}")

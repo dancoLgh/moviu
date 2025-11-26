@@ -21,6 +21,7 @@ class AppConfig:
     api_key: str = secrets.token_hex(16)
     printer_host: str = "192.168.0.100"
     printer_port: int = 9100
+    printer_width: int = 576
     simulate_printer: bool = False
     auto_start: bool = False
     usb_bridge_enabled: bool = False
@@ -39,6 +40,7 @@ class AppConfig:
             api_key=data.get("api_key", secrets.token_hex(16)),
             printer_host=data.get("printer_host", cls.printer_host),
             printer_port=int(data.get("printer_port", cls.printer_port)),
+            printer_width=int(data.get("printer_width", cls.printer_width)),
             simulate_printer=bool(data.get("simulate_printer", cls.simulate_printer)),
             auto_start=bool(data.get("auto_start", cls.auto_start)),
             usb_bridge_enabled=bool(data.get("usb_bridge_enabled", cls.usb_bridge_enabled)),

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -144,6 +145,7 @@ class DesktopApp:
         self.port_var = tk.StringVar(value=str(self.config.port))
         self.printer_host_var = tk.StringVar(value=self.config.printer_host)
         self.printer_port_var = tk.StringVar(value=str(self.config.printer_port))
+        self.printer_width_var = tk.StringVar(value=str(self.config.printer_width))
         self.api_key_var = tk.StringVar(value=self.config.api_key)
         self.simulate_var = tk.BooleanVar(value=self.config.simulate_printer)
         self.auto_start_var = tk.BooleanVar(value=self.config.auto_start)
@@ -198,25 +200,33 @@ class DesktopApp:
                 row=idx, column=1, sticky="ew", pady=2
             )
 
-        ttk.Label(form, text="API Key").grid(row=4, column=0, sticky="w", pady=2)
+        ttk.Label(form, text="Ancho (dots)").grid(row=4, column=0, sticky="w", pady=2)
+        self.width_combo = ttk.Combobox(
+            form,
+            textvariable=self.printer_width_var,
+            values=["576 (80mm)", "384 (58mm)"],
+        )
+        self.width_combo.grid(row=4, column=1, sticky="ew", pady=2)
+
+        ttk.Label(form, text="API Key").grid(row=5, column=0, sticky="w", pady=2)
         ttk.Entry(form, textvariable=self.api_key_var, state="readonly").grid(
-            row=4, column=1, sticky="ew", pady=2
+            row=5, column=1, sticky="ew", pady=2
         )
 
         ttk.Checkbutton(
             form,
             text="Simular impresora (solo desarrollo)",
             variable=self.simulate_var,
-        ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(8, 2))
+        ).grid(row=6, column=0, columnspan=2, sticky="w", pady=(8, 2))
 
         ttk.Checkbutton(
             form,
             text="Ejecutar al iniciar el sistema",
             variable=self.auto_start_var,
-        ).grid(row=6, column=0, columnspan=2, sticky="w", pady=2)
+        ).grid(row=7, column=0, columnspan=2, sticky="w", pady=2)
 
         btn_frame = ttk.Frame(form, style="CardInner.TFrame")
-        btn_frame.grid(row=7, column=0, columnspan=2, pady=(10, 4))
+        btn_frame.grid(row=8, column=0, columnspan=2, pady=(10, 4))
         for text, command in (
             ("Guardar", self.save_settings),
             ("Regenerar API Key", self.regenerate_api_key),
@@ -232,7 +242,7 @@ class DesktopApp:
 
         self.status_var = tk.StringVar(value="Servidor detenido")
         ttk.Label(form, textvariable=self.status_var, style="Status.TLabel").grid(
-            row=8, column=0, columnspan=2, sticky="w", pady=(4, 0)
+            row=9, column=0, columnspan=2, sticky="w", pady=(4, 0)
         )
 
         # Bridge form
@@ -319,6 +329,16 @@ class DesktopApp:
             self.config.port = int(self.port_var.get())
             self.config.printer_host = self.printer_host_var.get()
             self.config.printer_port = int(self.printer_port_var.get())
+            
+            # Parse printer width
+            width_str = self.printer_width_var.get()
+            # Extract number if it contains text (e.g. "576 (80mm)")
+            match = re.search(r"^\d+", width_str)
+            if match:
+                self.config.printer_width = int(match.group(0))
+            else:
+                self.config.printer_width = int(width_str)
+
             self.config.simulate_printer = self.simulate_var.get()
             self.config.auto_start = self.auto_start_var.get()
             self.config.usb_bridge_enabled = self.bridge_enabled_var.get()

@@ -57,8 +57,8 @@ def text_to_image(text: str, width: int = DEFAULT_WIDTH) -> Image.Image:
     return image
 
 
-def html_to_image(html: str) -> Image.Image:
+def html_to_image(html: str, width: int = DEFAULT_WIDTH) -> Image.Image:
     """High-level helper that turns HTML into a raster image."""
 
     text = html_to_plain_text(html)
-    return text_to_image(text)
+    return text_to_image(text, width=width)
