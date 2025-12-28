@@ -20,7 +20,7 @@ from .html_renderer import html_to_image
 
 @dataclass
 class PrintJob:
-    mode: Literal["html", "image", "raw", "raw_text"]
+    mode: Literal["html", "image", "pdf", "raw", "raw_text"]
     content: str
     printer_host: str
     printer_port: int
@@ -84,6 +84,9 @@ class PrintProcessor:
         elif job.mode == "html":
             image = html_to_image(job.content, width=self.width)
             preview = {"image": image, "html": job.content}
+        elif job.mode == "pdf":
+            image = self._decode_pdf(job.content)
+            preview = {"image": image}
         else:
             raise PrinterError(f"Modo no soportado: {job.mode}")
         return image_to_escpos(image), preview
@@ -178,6 +181,67 @@ class PrintProcessor:
         except Exception as exc:  # noqa: BLE001
             raise PrinterError("La imagen debe estar codificada en base64") from exc
         return Image.open(io.BytesIO(raw))
+
+    def _decode_pdf(self, data: str) -> Image.Image:
+        """Convert a base64-encoded PDF to a single concatenated image.
+
+        Each page is rendered and all pages are stacked vertically.
+        The result is resized to fit the printer width.
+        """
+        try:
+            import fitz  # PyMuPDF
+        except ImportError as exc:
+            raise PrinterError(
+                "PyMuPDF no está instalado. Ejecuta: pip install pymupdf"
+            ) from exc
+
+        try:
+            if data.startswith("data:application/pdf"):
+                _, b64_data = data.split(",", 1)
+                raw = base64.b64decode(b64_data)
+            else:
+                raw = base64.b64decode(data)
+        except Exception as exc:  # noqa: BLE001
+            raise PrinterError("El PDF debe estar codificado en base64") from exc
+
+        try:
+            doc = fitz.open(stream=raw, filetype="pdf")
+        except Exception as exc:  # noqa: BLE001
+            raise PrinterError(f"No se pudo abrir el PDF: {exc}") from exc
+
+        if doc.page_count == 0:
+            raise PrinterError("El PDF no tiene páginas")
+
+        images: list[Image.Image] = []
+        # Calculate zoom to fit printer width (72 DPI base)
+        zoom = self.width / 595.0  # A4 width in points ≈ 595
+        mat = fitz.Matrix(zoom, zoom)
+
+        for page_num in range(doc.page_count):
+            page = doc.load_page(page_num)
+            pix = page.get_pixmap(matrix=mat, colorspace=fitz.csGRAY)
+            img = Image.frombytes("L", (pix.width, pix.height), pix.samples)
+            images.append(img)
+
+        doc.close()
+
+        # Concatenate all pages vertically
+        total_height = sum(img.height for img in images)
+        final_width = max(img.width for img in images)
+        combined = Image.new("L", (final_width, total_height), 255)
+
+        y_offset = 0
+        for img in images:
+            combined.paste(img, (0, y_offset))
+            y_offset += img.height
+
+        # Resize if needed to fit printer width
+        if combined.width > self.width:
+            ratio = self.width / combined.width
+            new_height = int(combined.height * ratio)
+            combined = combined.resize((self.width, new_height), Image.Resampling.LANCZOS)
+
+        return combined
 
     @staticmethod
     def _send_to_printer(payload: bytes, host: Optional[str], port: Optional[int]) -> None:

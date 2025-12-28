@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import logging
 from typing import Optional
 
@@ -11,6 +12,12 @@ from pydantic import BaseModel, Field
 
 from .config import AppConfig
 from .printer import PrintJob, PrintProcessor, PrinterError
+from .usb_bridge import discover_printers
+from .system_printer import (
+    print_pdf_to_system_printer,
+    print_pdf_raw_to_printer,
+    SystemPrinterError,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -21,7 +28,7 @@ class PrinterSettings(BaseModel):
 
 
 class PrintRequest(BaseModel):
-    mode: str = Field("html", description="html | image | raw | raw_text")
+    mode: str = Field("html", description="html | image | pdf | raw | raw_text")
     content: str = Field(..., description="Payload del trabajo")
     printer: Optional[PrinterSettings] = None
     code_page: Optional[str] = Field(
@@ -39,6 +46,33 @@ class PrintResponse(BaseModel):
     port: int
     bytes: int
     preview: Optional[dict] = Field(None, description="Vista previa del trabajo si aplica")
+
+
+class SystemPrintRequest(BaseModel):
+    """Request para imprimir en impresoras del sistema (láser, inyección, etc.)."""
+    content: str = Field(..., description="PDF en base64 o data URI")
+    printer_name: Optional[str] = Field(
+        None,
+        description="Nombre de la impresora. Si no se especifica, usa la predeterminada."
+    )
+    raw_mode: bool = Field(
+        False,
+        description="Si es True, envía el PDF directamente a la impresora (requiere soporte nativo de PDF)"
+    )
+    dpi: int = Field(
+        150,
+        ge=72,
+        le=600,
+        description="Resolución de renderizado (72-600). Solo aplica cuando raw_mode=false. Mayor DPI = mejor calidad pero más lento."
+    )
+
+
+class SystemPrintResponse(BaseModel):
+    status: str
+    message: str
+    printer: str
+    bytes: Optional[int] = None
+    pages: Optional[int] = None
 
 
 def create_api(config: AppConfig) -> FastAPI:
@@ -100,8 +134,51 @@ def create_api(config: AppConfig) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return PrintResponse(**result)
 
+    @app.post("/api/print/system", response_model=SystemPrintResponse)
+    def print_system_endpoint(
+        request: SystemPrintRequest,
+        _: None = Depends(require_api_key),
+    ) -> SystemPrintResponse:
+        """Imprimir PDF en impresoras del sistema (láser, inyección, A4, A3, etc.)."""
+        try:
+            # Decode base64 content
+            content = request.content
+            if content.startswith("data:application/pdf"):
+                _, b64_data = content.split(",", 1)
+                pdf_data = base64.b64decode(b64_data)
+            else:
+                pdf_data = base64.b64decode(content)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"El PDF debe estar codificado en base64: {exc}"
+            ) from exc
+
+        try:
+            if request.raw_mode:
+                if not request.printer_name:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="raw_mode requiere especificar printer_name"
+                    )
+                result = print_pdf_raw_to_printer(pdf_data, request.printer_name)
+            else:
+                result = print_pdf_to_system_printer(pdf_data, request.printer_name, dpi=request.dpi)
+        except SystemPrinterError as exc:
+            LOGGER.exception("System print job failed")
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        return SystemPrintResponse(**result)
+
     @app.get("/api/health")
     def health(_: None = Depends(require_api_key)) -> dict:
         return {"status": "ok"}
 
+    @app.get("/api/printers")
+    def list_printers(_: None = Depends(require_api_key)) -> dict:
+        """Lista las impresoras instaladas en el sistema local."""
+        printers = discover_printers()
+        return {"printers": printers, "count": len(printers)}
+
     return app
+

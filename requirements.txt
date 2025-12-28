@@ -7,3 +7,4 @@ cryptography==46.0.3
 pystray==0.19.5
 pywin32>=306; platform_system == "Windows"
 pyinstaller>=5.13
+pymupdf>=1.24.0
