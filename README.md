@@ -6,11 +6,15 @@ Servidor de impresión local para convertir HTML → imagen → ESC/POS y expone
 
 - Aplicación de escritorio (Tkinter) que inicia/detiene el servidor con visor de logs.
 - API REST (`FastAPI`) accesible mediante `X-API-Key` y servido sobre HTTPS con certificados autogenerados.
-- Convierte HTML plano o imágenes base64 en comandos ESC/POS listos para impresoras térmicas.
-- Permite enviar comandos ESC/POS sin transformación (`mode="raw"` o `mode="raw_text"`).
-- Enrutamiento a impresoras de red vía TCP configurable por petición.
-- Modo de simulación de impresora que guarda los trabajos en disco y devuelve vistas previas para entornos de desarrollo.
-- Puente TCP → USB integrado para reenviar bytes recibidos por red a una impresora USB de Windows.
+- **Modos soportados:**
+  - `html` / `image` — Impresoras térmicas (ESC/POS)
+  - `pdf` — Modo unificado: impresoras térmicas (red) o del sistema (local)
+  - `raw` / `raw_text` — Comandos ESC/POS directos
+  - `zpl` — Impresoras de etiquetas Zebra
+- Enrutamiento a impresoras de red vía TCP o impresoras locales por nombre.
+- Modo de simulación que guarda trabajos en disco para desarrollo.
+- Puente TCP → USB para impresoras USB de Windows.
+- Descubrimiento de servicios mDNS/DNS-SD (Bonjour/Avahi).
 
 ## Requisitos
 
@@ -83,6 +87,76 @@ El modo `raw_text` interpreta las secuencias de escape (\n, \t, \x1b, etc.) sin 
 ```
 
 Code pages soportadas para `raw_text`: `cp437` (ESC t 0), `cp850` (ESC t 2), `cp860` (ESC t 3), `cp863` (ESC t 4), `cp865` (ESC t 5), `cp1252`/`latin-1` (ESC t 6), `cp866` (ESC t 7), `cp852` (ESC t 8) y `cp858` (ESC t 9). Si pasas una no soportada, la API devuelve error de validación.
+
+### Imprimir PDFs (modo unificado)
+
+El modo `pdf` detecta automáticamente el destino y el tipo de envío según los campos de `printer`:
+
+**Impresora de red térmica (renderiza a ESC/POS):**
+```json
+{
+  "mode": "pdf",
+  "content": "JVBERi0xLjQN...",
+  "printer": {"host": "192.168.1.50", "port": 9100}
+}
+```
+
+**Impresora de red con soporte PDF (envío directo):**
+```json
+{
+  "mode": "pdf",
+  "content": "JVBERi0xLjQN...",
+  "printer": {"host": "192.168.1.100", "port": 9100},
+  "raw_mode": true
+}
+```
+
+**Impresora local del sistema (renderiza con Windows GDI):**
+```json
+{
+  "mode": "pdf",
+  "content": "JVBERi0xLjQN...",
+  "printer": {"name": "HP LaserJet Pro"},
+  "dpi": 300
+}
+```
+
+**Impresora local con PDF directo (envío sin renderizar):**
+```json
+{
+  "mode": "pdf",
+  "content": "JVBERi0xLjQN...",
+  "printer": {"name": "Kyocera ECOSYS"},
+  "raw_mode": true
+}
+```
+
+| Destino | `raw_mode` | Comportamiento |
+|---------|------------|----------------|
+| `printer.name` | `false` | Renderiza con Windows GDI |
+| `printer.name` | `true` | Envía PDF directo al spooler |
+| `printer.host/port` | `false` | Renderiza a ESC/POS (térmicas) |
+| `printer.host/port` | `true` | Envía PDF directo por TCP |
+
+### Imprimir etiquetas ZPL (Zebra)
+
+Usa el modo `zpl` para impresoras de etiquetas:
+
+```json
+{
+  "mode": "zpl",
+  "content": "^XA^FO50,50^ADN,36,20^FDHello World^FS^XZ",
+  "printer": {"host": "192.168.1.100", "port": 9100}
+}
+```
+
+### Listar impresoras disponibles
+
+`GET /api/printers` devuelve las impresoras instaladas en el sistema:
+
+```json
+{"printers": ["HP LaserJet Pro", "POS-80C"], "count": 2}
+```
 
 ### Vista previa para modo desarrollo
 
@@ -158,3 +232,176 @@ MIT
 ## Puente TCP → impresora USB
 
 En la propia aplicación encontrarás el apartado **"Puente TCP → Impresora USB"** para activar o detener el listener. Selecciona la impresora USB instalada en Windows, el puerto TCP de escucha y marca **"Arrancar puente automáticamente"** si quieres que se levante al iniciar Moviu. En sistemas no Windows los trabajos se guardan como simulaciones en `~/.tcp_usb_bridge/` para poder probar el flujo sin hardware real.
+
+---
+
+## Descubrimiento de servicios (mDNS/DNS-SD)
+
+El servidor Moviu se anuncia automáticamente en la red local usando mDNS/DNS-SD (compatible con Bonjour/Avahi). Esto permite que los clientes descubran servidores sin conocer la IP previamente.
+
+### Endpoint de descubrimiento
+
+`GET /api/discover` — **No requiere autenticación**
+
+```bash
+curl -X GET "https://localhost:8443/api/discover?timeout=3"
+```
+
+Respuesta:
+
+```json
+{
+  "servers": [
+    {
+      "name": "Moviu Print Server._moviu-print._tcp.local.",
+      "port": 9050,
+      "addresses": ["192.168.1.156"],
+      "properties": {
+        "version": "1.0",
+        "protocol": "https",
+        "hostname": "DESKTOP-ABC123"
+      }
+    }
+  ],
+  "count": 1
+}
+```
+
+### Utilidad de línea de comandos
+
+Incluimos `discover.py` para buscar servidores desde la terminal:
+
+```bash
+# Búsqueda básica (3 segundos)
+python discover.py
+
+# Con timeout personalizado
+python discover.py --timeout 5
+
+# Salida JSON (para scripts)
+python discover.py --json
+
+# Modo detallado
+python discover.py --verbose
+```
+
+### Compilar la utilidad discover.py
+
+Para distribuir la utilidad como ejecutable independiente:
+
+#### Windows
+
+```powershell
+pyinstaller --noconfirm --onefile --name MoviuDiscover discover.py
+```
+
+El ejecutable queda en `dist/MoviuDiscover.exe`.
+
+#### Linux/macOS
+
+```bash
+pyinstaller --noconfirm --onefile --name moviu-discover discover.py
+```
+
+### Descubrimiento desde JavaScript (Browser/Node.js)
+
+Dado que los navegadores no pueden hacer mDNS directamente, usa el endpoint HTTP del servidor:
+
+```javascript
+/**
+ * Descubre servidores Moviu Print Server en la red local.
+ * Requiere conocer al menos un servidor para hacer la consulta inicial.
+ * 
+ * @param {string} knownServerUrl - URL de un servidor conocido (ej: https://192.168.1.100:8443)
+ * @param {number} timeout - Segundos de espera (default: 3)
+ * @returns {Promise<Array>} Lista de servidores encontrados
+ */
+async function discoverMoviuServers(knownServerUrl, timeout = 3) {
+  try {
+    const response = await fetch(
+      `${knownServerUrl}/api/discover?timeout=${timeout}`,
+      {
+        method: 'GET',
+        // No requiere X-API-Key
+      }
+    );
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    
+    const data = await response.json();
+    return data.servers || [];
+  } catch (error) {
+    console.error('Error descubriendo servidores:', error);
+    return [];
+  }
+}
+
+// Ejemplo de uso
+async function main() {
+  // Si conoces al menos un servidor, puedes descubrir todos los demás
+  const servers = await discoverMoviuServers('https://192.168.1.100:8443');
+  
+  console.log(`Encontrados ${servers.length} servidor(es):`);
+  servers.forEach((server, i) => {
+    const addr = server.addresses?.[0] || 'unknown';
+    console.log(`  [${i + 1}] ${server.name}`);
+    console.log(`      URL: https://${addr}:${server.port}`);
+  });
+}
+
+main();
+```
+
+### Descubrimiento nativo con Node.js (usando multicast-dns)
+
+Para hacer descubrimiento mDNS real desde Node.js sin depender de un servidor conocido:
+
+```javascript
+const mdns = require('multicast-dns')();
+
+function discoverMoviuServersNative(timeout = 3000) {
+  return new Promise((resolve) => {
+    const servers = [];
+    
+    mdns.on('response', (response) => {
+      // Buscar servicios _moviu-print._tcp.local
+      const srvRecords = response.answers.filter(
+        (a) => a.type === 'SRV' && a.name.includes('_moviu-print._tcp')
+      );
+      
+      srvRecords.forEach((srv) => {
+        const aRecords = response.additionals.filter(
+          (a) => a.type === 'A' && a.name === srv.data.target
+        );
+        
+        servers.push({
+          name: srv.name,
+          port: srv.data.port,
+          host: srv.data.target,
+          addresses: aRecords.map((a) => a.data),
+        });
+      });
+    });
+    
+    // Enviar query mDNS
+    mdns.query({
+      questions: [{ name: '_moviu-print._tcp.local', type: 'PTR' }],
+    });
+    
+    setTimeout(() => {
+      mdns.destroy();
+      resolve(servers);
+    }, timeout);
+  });
+}
+
+// Uso
+discoverMoviuServersNative(3000).then((servers) => {
+  console.log('Servidores encontrados:', servers);
+});
+```
+
+**Dependencia npm:** `npm install multicast-dns`
+

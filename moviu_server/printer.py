@@ -20,7 +20,7 @@ from .html_renderer import html_to_image
 
 @dataclass
 class PrintJob:
-    mode: Literal["html", "image", "pdf", "raw", "raw_text"]
+    mode: Literal["html", "image", "pdf", "raw", "raw_text", "zpl"]
     content: str
     printer_host: str
     printer_port: int
@@ -72,6 +72,10 @@ class PrintProcessor:
         if job.mode == "raw":
             payload = self._decode_raw(job.content)
             preview = {"hex": payload.hex()}
+            return payload, preview
+        if job.mode == "zpl":
+            payload = job.content.encode("utf-8")
+            preview = {"zpl": job.content}
             return payload, preview
         if job.mode == "image":
             image = self._decode_image(job.content)

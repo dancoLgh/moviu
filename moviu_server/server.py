@@ -18,22 +18,34 @@ from .system_printer import (
     print_pdf_raw_to_printer,
     SystemPrinterError,
 )
+from .mdns import discover_moviu_servers
 
 LOGGER = logging.getLogger(__name__)
 
 
 class PrinterSettings(BaseModel):
-    host: Optional[str] = Field(None, description="Host/IP del printer")
-    port: Optional[int] = Field(None, description="Puerto TCP del printer")
+    host: Optional[str] = Field(None, description="Host/IP del printer (para impresoras de red)")
+    port: Optional[int] = Field(None, description="Puerto TCP del printer (para impresoras de red)")
+    name: Optional[str] = Field(None, description="Nombre de impresora local (para pdf_system)")
 
 
 class PrintRequest(BaseModel):
-    mode: str = Field("html", description="html | image | pdf | raw | raw_text")
+    mode: str = Field("html", description="html | image | pdf | raw | raw_text | zpl")
     content: str = Field(..., description="Payload del trabajo")
     printer: Optional[PrinterSettings] = None
     code_page: Optional[str] = Field(
         None,
         description="Code page a usar para raw_text (p.ej. cp437, cp850, cp858, cp1252)",
+    )
+    dpi: int = Field(
+        150,
+        ge=72,
+        le=600,
+        description="DPI para renderizado de PDF en impresora local (72-600). Mayor = mejor calidad."
+    )
+    raw_mode: bool = Field(
+        False,
+        description="Para PDF en impresora local: enviar PDF directamente sin renderizar (requiere soporte PDF nativo)"
     )
     simulate: Optional[bool] = Field(
         None, description="Forzar simulación/impresora virtual (solo desarrollo)"
@@ -42,37 +54,14 @@ class PrintRequest(BaseModel):
 
 class PrintResponse(BaseModel):
     status: str
-    host: str
-    port: int
-    bytes: int
+    host: Optional[str] = None
+    port: Optional[int] = None
+    bytes: Optional[int] = None
+    printer: Optional[str] = Field(None, description="Nombre de impresora local (para pdf_system)")
+    pages: Optional[int] = Field(None, description="Páginas impresas (para pdf_system)")
+    message: Optional[str] = Field(None, description="Mensaje descriptivo")
     preview: Optional[dict] = Field(None, description="Vista previa del trabajo si aplica")
 
-
-class SystemPrintRequest(BaseModel):
-    """Request para imprimir en impresoras del sistema (láser, inyección, etc.)."""
-    content: str = Field(..., description="PDF en base64 o data URI")
-    printer_name: Optional[str] = Field(
-        None,
-        description="Nombre de la impresora. Si no se especifica, usa la predeterminada."
-    )
-    raw_mode: bool = Field(
-        False,
-        description="Si es True, envía el PDF directamente a la impresora (requiere soporte nativo de PDF)"
-    )
-    dpi: int = Field(
-        150,
-        ge=72,
-        le=600,
-        description="Resolución de renderizado (72-600). Solo aplica cuando raw_mode=false. Mayor DPI = mejor calidad pero más lento."
-    )
-
-
-class SystemPrintResponse(BaseModel):
-    status: str
-    message: str
-    printer: str
-    bytes: Optional[int] = None
-    pages: Optional[int] = None
 
 
 def create_api(config: AppConfig) -> FastAPI:
@@ -113,6 +102,66 @@ def create_api(config: AppConfig) -> FastAPI:
         request: PrintRequest,
         _: None = Depends(require_api_key),
     ) -> PrintResponse:
+        # Handle PDF mode with intelligent routing
+        if request.mode == "pdf":
+            printer_name = request.printer.name if request.printer else None
+            printer_host = request.printer.host if request.printer else None
+            printer_port = request.printer.port if request.printer else None
+
+            # Decode PDF content once
+            try:
+                content = request.content
+                if content.startswith("data:application/pdf"):
+                    _, b64_data = content.split(",", 1)
+                    pdf_data = base64.b64decode(b64_data)
+                else:
+                    pdf_data = base64.b64decode(content)
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"El PDF debe estar codificado en base64: {exc}"
+                ) from exc
+
+            # Route 1: Print to local system printer by name
+            if printer_name:
+                try:
+                    if request.raw_mode:
+                        result = print_pdf_raw_to_printer(pdf_data, printer_name)
+                    else:
+                        result = print_pdf_to_system_printer(pdf_data, printer_name, dpi=request.dpi)
+                except SystemPrinterError as exc:
+                    LOGGER.exception("System print job failed")
+                    raise HTTPException(status_code=400, detail=str(exc)) from exc
+                return PrintResponse(**result)
+
+            # Route 2: Print to network printer by host/port
+            if printer_host or config.printer_host:
+                target_host = printer_host or config.printer_host
+                target_port = printer_port or config.printer_port or 9100
+
+                if request.raw_mode:
+                    # Send PDF directly via TCP (for printers with native PDF support)
+                    import socket
+                    try:
+                        with socket.create_connection((target_host, target_port), timeout=30) as sock:
+                            sock.sendall(pdf_data)
+                        LOGGER.info("PDF RAW enviado a %s:%d (%d bytes)", target_host, target_port, len(pdf_data))
+                        return PrintResponse(
+                            status="sent",
+                            host=target_host,
+                            port=target_port,
+                            bytes=len(pdf_data),
+                            message=f"PDF enviado directamente a {target_host}:{target_port}",
+                        )
+                    except Exception as exc:
+                        LOGGER.exception("Failed to send PDF to network printer")
+                        raise HTTPException(status_code=400, detail=f"Error al enviar PDF: {exc}") from exc
+                else:
+                    # Render PDF to ESC/POS and send (for thermal printers)
+                    # Falls through to standard processing below
+                    pass
+
+        # Handle other modes (thermal printers via TCP)
         printer_host = request.printer.host if request.printer else config.printer_host
         printer_port = request.printer.port if request.printer else config.printer_port
         simulate = (
@@ -134,42 +183,6 @@ def create_api(config: AppConfig) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return PrintResponse(**result)
 
-    @app.post("/api/print/system", response_model=SystemPrintResponse)
-    def print_system_endpoint(
-        request: SystemPrintRequest,
-        _: None = Depends(require_api_key),
-    ) -> SystemPrintResponse:
-        """Imprimir PDF en impresoras del sistema (láser, inyección, A4, A3, etc.)."""
-        try:
-            # Decode base64 content
-            content = request.content
-            if content.startswith("data:application/pdf"):
-                _, b64_data = content.split(",", 1)
-                pdf_data = base64.b64decode(b64_data)
-            else:
-                pdf_data = base64.b64decode(content)
-        except Exception as exc:
-            raise HTTPException(
-                status_code=400,
-                detail=f"El PDF debe estar codificado en base64: {exc}"
-            ) from exc
-
-        try:
-            if request.raw_mode:
-                if not request.printer_name:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="raw_mode requiere especificar printer_name"
-                    )
-                result = print_pdf_raw_to_printer(pdf_data, request.printer_name)
-            else:
-                result = print_pdf_to_system_printer(pdf_data, request.printer_name, dpi=request.dpi)
-        except SystemPrinterError as exc:
-            LOGGER.exception("System print job failed")
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-        return SystemPrintResponse(**result)
-
     @app.get("/api/health")
     def health(_: None = Depends(require_api_key)) -> dict:
         return {"status": "ok"}
@@ -179,6 +192,21 @@ def create_api(config: AppConfig) -> FastAPI:
         """Lista las impresoras instaladas en el sistema local."""
         printers = discover_printers()
         return {"printers": printers, "count": len(printers)}
+
+    @app.get("/api/discover")
+    def discover_services(
+        timeout: float = 3.0,
+    ) -> dict:
+        """Descubre servidores Moviu Print Server en la red local via mDNS.
+
+        Este endpoint no requiere autenticación para permitir el descubrimiento
+        de servicios antes de conocer la API key.
+
+        Args:
+            timeout: Segundos a esperar para el descubrimiento (default: 3.0)
+        """
+        servers = discover_moviu_servers(timeout=timeout)
+        return {"servers": servers, "count": len(servers)}
 
     return app
 

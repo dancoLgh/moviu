@@ -1,89 +1,144 @@
 # Integración de la API - Moviu Print Server
 
-Resumen rápido
+## Resumen rápido
+
 - Servidor HTTPS local que expone una API REST para enviar trabajos de impresión.
 - Autenticación mediante `X-API-Key` en cabecera.
-- Endpoints principales: `POST /api/print`, `GET /api/health`.
-- Soporta modos: `html`, `image`, `raw`, `raw_text`.
+- Endpoints principales: `POST /api/print`, `GET /api/health`, `GET /api/printers`, `GET /api/discover`.
+- Soporta modos: `html`, `image`, `pdf`, `pdf_system`, `raw`, `raw_text`, `zpl`.
 
-Requisitos
-- La aplicación corre localmente (por defecto en `https://127.0.0.1:9000`).
+## Requisitos
+
+- La aplicación corre localmente (por defecto en `https://127.0.0.1:9050`).
 - Certificados auto-firmados se generan automáticamente; en entornos de desarrollo puedes usar `-k` en `curl` o `verify=False` en `requests`.
-- La API Key se persiste en el archivo de configuración (ver [moviu_server/config.py](moviu_server/config.py#L1-L40)).
+- La API Key se persiste en el archivo de configuración (`~/.moviu_printer/config.json`).
 
-Autenticación
-- Todas las llamadas deben incluir el header `X-API-Key: <API_KEY>`.
+## Autenticación
+
+- Todas las llamadas (excepto `/api/discover`) deben incluir el header `X-API-Key: <API_KEY>`.
 - Si la API key es inválida la API devuelve `401 Unauthorized`.
 
-Esquemas JSON
+---
 
-PrintRequest (cuerpo para `POST /api/print`)
-- `mode` (string): "html" | "image" | "raw" | "raw_text". Default: "html".
-- `content` (string): payload del trabajo (HTML, base64 de imagen, hex/base64 para raw, o texto con escapes para raw_text).
-- `printer` (opcional): objeto con `host` (string) y `port` (int) para sobrescribir destino.
-- `code_page` (opcional): para `raw_text` (ej. `cp437`, `cp850`, `cp1252`, `cp858`).
-- `simulate` (opcional, bool): forzar simulación (no enviar a impresora física).
+## Esquemas JSON
 
-PrintResponse
-- `status` (string): `sent` (enviado) o `simulated` (simulado).
-- `host` (string): host de impresora usado.
-- `port` (int): puerto de impresora usado.
-- `bytes` (int): tamaño en bytes del payload enviado.
-- `preview` (opcional, object): datos de previsualización según modo (texto, hex, html, image base64, paths locales si simulado).
+### PrinterSettings (objeto opcional en PrintRequest)
 
-Endpoints
-- OPTIONS /api/print
-  - Uso: CORS preflight o comprobación rápida.
-  - Respuesta: `200` JSON `{ "status": "ok" }`.
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `host` | string | Host/IP de la impresora de red (para impresoras térmicas) |
+| `port` | int | Puerto TCP de la impresora (default: 9100) |
+| `name` | string | Nombre de impresora local (para modo `pdf` en impresoras del sistema) |
 
-- POST /api/print
-  - Descripción: enviar un trabajo de impresión.
-  - Headers: `X-API-Key: <API_KEY>`, `Content-Type: application/json`.
-  - Body: `PrintRequest`.
-  - Respuestas:
-    - `200` con `PrintResponse`.
-    - `400` si el trabajo no es procesable (ej. imagen no base64 válida, code page desconocida).
-    - `401` si API key inválida.
+### PrintRequest (cuerpo para `POST /api/print`)
 
-- GET /api/health
-  - Requiere `X-API-Key`.
-  - Respuesta: `200` `{ "status": "ok" }`.
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `mode` | string | `html` \| `image` \| `pdf` \| `raw` \| `raw_text` \| `zpl`. Default: `html` |
+| `content` | string | Payload del trabajo (HTML, base64, hex, texto, ZPL) |
+| `printer` | PrinterSettings | Destino de impresión (opcional) |
+| `code_page` | string | Para `raw_text`: cp437, cp850, cp858, cp1252, etc. |
+| `dpi` | int | Para `pdf` con `printer.name`: resolución 72-600 (default: 150) |
+| `raw_mode` | bool | Para `pdf` con `printer.name`: enviar PDF directo sin renderizar |
+| `simulate` | bool | Forzar simulación (no enviar a impresora física) |
 
-Modos y formatos de `content`
-- `html`: HTML (string). El servidor renderiza en imagen y lo convierte a ESC/POS.
-  - Ejemplo: `{"mode":"html","content":"<h1>Hola</h1>"}`
-- `image`: Base64 de imagen o `data:` URL (`data:image/png;base64,...`).
-  - Ejemplo: `{"mode":"image","content":"data:image/png;base64,iVBORw0..."}`
-- `raw`: Bytes ya formateados para la impresora, en hexadecimal o base64.
-  - Hex: `0A1B2C...` (sin prefijo).
-  - Base64: cadena base64 pura.
-  - Ejemplo: `{"mode":"raw","content":"1b40"}`
-- `raw_text`: Texto con escapes (`\n`, `\r`, `\xHH`) que se codifica en la code page seleccionada y puede prefijarse con el comando ESC que selecciona code page.
-  - Ejemplo: `{"mode":"raw_text","content":"Hola\\nMundo\\x0A","code_page":"cp1252"}`
+### PrintResponse
 
-Ejemplos prácticos
-- cURL (HTML):
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `status` | string | `sent` o `simulated` |
+| `host` | string | Host de impresora (modos térmicos) |
+| `port` | int | Puerto de impresora (modos térmicos) |
+| `bytes` | int | Tamaño del payload |
+| `printer` | string | Nombre de impresora (pdf_system) |
+| `pages` | int | Páginas impresas (pdf_system) |
+| `message` | string | Mensaje descriptivo |
+| `preview` | object | Datos de previsualización (si simulado) |
 
-```bash
-curl -k -X POST "https://127.0.0.1:9000/api/print" \
-  -H "X-API-Key: $API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"mode":"html","content":"<p>Prueba</p>"}'
+---
+
+## Endpoints
+
+### OPTIONS /api/print
+
+CORS preflight o comprobación rápida.
+
+**Respuesta:** `200 { "status": "ok" }`
+
+### POST /api/print
+
+Enviar un trabajo de impresión.
+
+**Headers:** `X-API-Key`, `Content-Type: application/json`
+
+**Respuestas:**
+- `200` con `PrintResponse`
+- `400` si el trabajo no es procesable
+- `401` si API key inválida
+
+### GET /api/health
+
+Verificar estado del servidor.
+
+**Headers:** `X-API-Key`
+
+**Respuesta:** `200 { "status": "ok" }`
+
+### GET /api/printers
+
+Listar impresoras instaladas en el sistema.
+
+**Headers:** `X-API-Key`
+
+**Respuesta:**
+```json
+{
+  "printers": ["HP LaserJet Pro", "POS-80C", "Microsoft Print to PDF"],
+  "count": 3
+}
 ```
-Nota: `-k` omite verificación TLS para certificados auto-firmados.
 
-- Python `requests` (ignorar verificación en dev):
+### GET /api/discover
 
-```python
-import requests
-api_key = "YOUR_API_KEY"
-url = "https://127.0.0.1:9000/api/print"
-payload = {"mode":"html","content":"<b>Hola</b>"}
-res = requests.post(url, headers={"X-API-Key": api_key}, json=payload, verify=False)
-print(res.status_code, res.json())
+Descubrir servidores Moviu en la red local (mDNS). **No requiere autenticación.**
+
+**Query params:** `timeout` (float, default: 3.0)
+
+**Respuesta:**
+```json
+{
+  "servers": [
+    {
+      "name": "Moviu Print Server._moviu-print._tcp.local.",
+      "port": 9050,
+      "addresses": ["192.168.1.156"],
+      "properties": {"version": "1.0", "protocol": "https"}
+    }
+  ],
+  "count": 1
+}
 ```
 
-- Enviar imagen (data URL):
+---
+
+## Modos de impresión
+
+### `html` — Impresoras térmicas
+
+HTML renderizado a imagen y convertido a ESC/POS.
+
+```json
+{
+  "mode": "html",
+  "content": "<h1>Ticket</h1><p>Gracias por su compra</p>",
+  "printer": {"host": "192.168.1.50", "port": 9100}
+}
+```
+
+### `image` — Impresoras térmicas
+
+Imagen en base64 convertida a ESC/POS.
+
 ```json
 {
   "mode": "image",
@@ -91,61 +146,220 @@ print(res.status_code, res.json())
 }
 ```
 
-- Enviar raw (hex):
-```json
-{"mode":"raw","content":"1b40..."}
-```
+### `pdf` — Modo unificado para cualquier impresora
 
-- Enviar raw_text con escapes:
+El modo `pdf` detecta automáticamente el destino y el tipo de envío:
+
+**Impresora de red térmica (renderiza a ESC/POS):**
 ```json
 {
-  "mode":"raw_text",
-  "content":"Nombre: Juan\\nTotal: 10.00EUR\\x0A\\x1DVA",
-  "code_page":"cp1252"
+  "mode": "pdf",
+  "content": "JVBERi0xLjQN...",
+  "printer": {"host": "192.168.1.50", "port": 9100}
 }
 ```
 
-Previsualización y simulación
-- Si `simulate` es `true` o la configuración del servidor tiene `simulate_printer = true`, la API no envía los bytes a la impresora.
-- En modo simulado la respuesta incluirá `preview` con rutas locales (`payload_path`, `text`, `hex`, `html`) y la imagen en base64 si aplica.
-- Los trabajos simulados se guardan en el directorio de configuración del usuario (ver `CONFIG_DIR` en [moviu_server/config.py](moviu_server/config.py#L1-L40)).
+**Impresora de red con soporte PDF nativo (envío directo):**
+```json
+{
+  "mode": "pdf",
+  "content": "JVBERi0xLjQN...",
+  "printer": {"host": "192.168.1.100", "port": 9100},
+  "raw_mode": true
+}
+```
 
-Errores comunes
-- `400 Bad Request`: imagen no base64 válida, raw mal formado, code page desconocida.
-- `401 Unauthorized`: cabecera `X-API-Key` ausente o incorrecta.
-- `500` es raro; revisar logs localmente (archivo `app.log`, carpeta de certificados/registro).
+**Impresora local del sistema (renderiza con Windows GDI):**
+```json
+{
+  "mode": "pdf",
+  "content": "JVBERi0xLjQN...",
+  "printer": {"name": "HP LaserJet Pro"},
+  "dpi": 300
+}
+```
 
-Puente TCP → USB (TCP USB Bridge)
-- Propósito: recibir bytes crudos por TCP y enviarlos a una impresora USB local (Windows) o guardarlos en disco en otros sistemas.
-- El servicio escucha en `host:port` (por defecto la app usa la configuración `usb_bridge_port` y `usb_bridge_printer`).
-- Protocolo: conexión TCP simple; servidor lee todos los bytes enviados por el cliente y, al cerrar la conexión, envía esos bytes a la impresora (o los guarda para sistemas no Windows).
+**Impresora local con PDF directo (envío sin renderizar):**
+```json
+{
+  "mode": "pdf",
+  "content": "JVBERi0xLjQN...",
+  "printer": {"name": "Kyocera ECOSYS"},
+  "raw_mode": true
+}
+```
 
-Ejemplo (Python) — enviar bytes crudos al puente:
+| Destino | `raw_mode` | Comportamiento |
+|---------|------------|----------------|
+| `printer.name` | `false` | Renderiza con Windows GDI (compatible con todas) |
+| `printer.name` | `true` | Envía PDF directo al spooler (requiere soporte PDF) |
+| `printer.host/port` | `false` | Renderiza a ESC/POS (para térmicas) |
+| `printer.host/port` | `true` | Envía PDF directo por TCP (para láser/inkjet con PDF nativo) |
+
+| Opción | Descripción |
+|--------|-------------|
+| `dpi` | Resolución para renderizado: 72-600 (default: 150). Solo aplica cuando `raw_mode=false` |
+
+### `raw` — Bytes directos
+
+Bytes ESC/POS en hexadecimal o base64.
+
+```json
+{
+  "mode": "raw",
+  "content": "1b401b6101486f6c610a1d5630"
+}
+```
+
+### `raw_text` — Texto con escapes
+
+Texto con secuencias de escape (`\n`, `\xHH`) codificado en la code page seleccionada.
+
+```json
+{
+  "mode": "raw_text",
+  "content": "\\x1b@Nombre: Juan\\nTotal: $10.00\\x0a\\x1dV\\x00",
+  "code_page": "cp858"
+}
+```
+
+**Code pages:** cp437, cp850, cp858, cp860, cp863, cp865, cp866, cp852, cp1252/latin-1
+
+### `zpl` — Impresoras de etiquetas Zebra
+
+Comandos ZPL enviados directamente.
+
+```json
+{
+  "mode": "zpl",
+  "content": "^XA^FO50,50^ADN,36,20^FDHello World^FS^XZ",
+  "printer": {"host": "192.168.1.100", "port": 9100}
+}
+```
+
+---
+
+## Ejemplos prácticos
+
+### cURL - HTML
+
+```bash
+curl -k -X POST "https://127.0.0.1:9050/api/print" \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"mode":"html","content":"<p>Prueba</p>"}'
+```
+
+### cURL - PDF a impresora láser
+
+```bash
+curl -k -X POST "https://127.0.0.1:9050/api/print" \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"mode":"pdf_system","content":"JVBERi0x...","printer":{"name":"HP LaserJet Pro"},"dpi":300}'
+```
+
+### Python - requests
+
+```python
+import requests
+import base64
+
+api_key = "YOUR_API_KEY"
+url = "https://127.0.0.1:9050/api/print"
+
+# HTML a térmica
+payload = {"mode": "html", "content": "<b>Hola</b>"}
+res = requests.post(url, headers={"X-API-Key": api_key}, json=payload, verify=False)
+print(res.json())
+
+# PDF a láser
+with open("documento.pdf", "rb") as f:
+    pdf_b64 = base64.b64encode(f.read()).decode()
+
+payload = {
+    "mode": "pdf_system",
+    "content": pdf_b64,
+    "printer": {"name": "HP LaserJet Pro"},
+    "dpi": 300
+}
+res = requests.post(url, headers={"X-API-Key": api_key}, json=payload, verify=False)
+print(res.json())
+```
+
+### JavaScript - fetch
+
+```javascript
+const apiKey = 'YOUR_API_KEY';
+const url = 'https://192.168.1.100:9050/api/print';
+
+// HTML a térmica
+fetch(url, {
+  method: 'POST',
+  headers: {
+    'X-API-Key': apiKey,
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    mode: 'html',
+    content: '<h1>Ticket</h1><p>Gracias!</p>'
+  })
+}).then(r => r.json()).then(console.log);
+
+// PDF a láser
+fetch(url, {
+  method: 'POST',
+  headers: {
+    'X-API-Key': apiKey,
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    mode: 'pdf_system',
+    content: pdfBase64,
+    printer: { name: 'HP LaserJet Pro' },
+    dpi: 300
+  })
+}).then(r => r.json()).then(console.log);
+```
+
+---
+
+## Simulación y previsualización
+
+- Si `simulate: true` o la configuración tiene `simulate_printer = true`, no se envía a la impresora.
+- La respuesta incluirá `preview` con rutas locales y datos en base64.
+- Los trabajos simulados se guardan en `~/.moviu_printer/simulated_jobs/`.
+
+---
+
+## Puente TCP → USB
+
+Recibe bytes crudos por TCP y los envía a una impresora USB local.
+
 ```python
 import socket
-payload = b"\x1b@Hola\n"  # ESC @ + Texto + newline
+payload = b"\x1b@Hola\n"  # ESC @ + Texto
 with socket.create_connection(("127.0.0.1", 9100), timeout=5) as s:
     s.sendall(payload)
 ```
 
-Ejemplo con `nc` (Linux/macOS):
-```bash
-printf "\x1b@Hola\n" | nc 127.0.0.1 9100
-```
+---
 
-Comportamiento en Windows
-- Si `win32print` está disponible, el puente enviará bytes directamente a la impresora seleccionada (raw).
-- En otros sistemas se guardará un archivo binario en `~/.tcp_usb_bridge/simulated_jobs/job.bin`.
+## Errores comunes
 
-Archivos relevantes
-- Código API: [moviu_server/server.py](moviu_server/server.py#L1-L200)
-- Procesamiento de trabajos: [moviu_server/printer.py](moviu_server/printer.py#L1-L240)
-- Configuración y ubicación de `api_key`: [moviu_server/config.py](moviu_server/config.py#L1-L80)
-- Puente TCP→USB: [tcp_usb_bridge/printer_bridge.py](tcp_usb_bridge/printer_bridge.py#L1-L260)
+| Código | Causa |
+|--------|-------|
+| `400` | Contenido inválido (base64 mal formado, code page desconocida) |
+| `401` | API Key ausente o incorrecta |
+| `500` | Error interno (revisar logs en `~/.moviu_printer/app.log`) |
 
-Sugerencias / próximos pasos
-- Verificar la `api_key` en el archivo de configuración (`~/.moviu_printer/config.json`) o desde la UI de la aplicación.
-- Para integración desde navegadores, usar el preflight `OPTIONS /api/print` y enviar `X-API-Key` en las cabeceras.
-- Añadir ejemplos en el repositorio para cada modo (`examples/print_html.py`, `examples/print_raw.py`).
+---
 
-Archivo de documentación generado: `docs/API_INTEGRACION.md`.
+## Archivos relevantes
+
+- API: `moviu_server/server.py`
+- Procesamiento: `moviu_server/printer.py`
+- Impresión sistema: `moviu_server/system_printer.py`
+- mDNS: `moviu_server/mdns.py`
+- Configuración: `moviu_server/config.py`
+- Puente TCP→USB: `tcp_usb_bridge/printer_bridge.py`

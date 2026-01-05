@@ -24,6 +24,7 @@ from .certs import certificates_folder, ensure_certificates, export_certificate
 from .config import AppConfig, CONFIG_DIR, load_config, save_config
 from .server import create_api
 from .usb_bridge import UsbBridgeController, discover_printers
+from .mdns import MoviuServiceAnnouncer
 
 
 class ServerController:
@@ -33,6 +34,7 @@ class ServerController:
         self.config = config
         self.server: uvicorn.Server | None = None
         self.thread: threading.Thread | None = None
+        self.mdns_announcer: MoviuServiceAnnouncer | None = None
 
     def start(self) -> None:
         if self.server and self.server.started:
@@ -55,7 +57,20 @@ class ServerController:
         self.thread = threading.Thread(target=self.server.run, daemon=True)
         self.thread.start()
 
+        # Start mDNS announcement
+        self.mdns_announcer = MoviuServiceAnnouncer(
+            port=self.config.port,
+            instance_name="Moviu Print Server",
+            properties={"api_version": "1.0", "protocol": "https"},
+        )
+        self.mdns_announcer.start()
+
     def stop(self) -> None:
+        # Stop mDNS announcement
+        if self.mdns_announcer:
+            self.mdns_announcer.stop()
+            self.mdns_announcer = None
+
         if self.server:
             self.server.should_exit = True
         if self.thread and self.thread.is_alive():
@@ -138,6 +153,7 @@ class DesktopApp:
             on_exit=lambda: self.root.after(0, self._do_exit),
         )
         self._apply_autostart(self.config.auto_start, notify=False)
+        self._maybe_autostart_server()
         self._maybe_autostart_bridge()
 
     def _build_ui(self) -> None:
@@ -346,7 +362,7 @@ class DesktopApp:
             self.config.usb_bridge_printer = self.bridge_printer_var.get()
             self.config.usb_bridge_autostart = self.bridge_autostart_var.get()
             save_config(self.config)
-            self._apply_autostart(self.config.auto_start)
+            self._apply_autostart(self.config.auto_start, notify=notify)
             if notify:
                 messagebox.showinfo("Configuración", "Configuración guardada")
             logging.info("Configuración guardada")
@@ -413,11 +429,17 @@ class DesktopApp:
         logging.info(text)
 
     def _maybe_autostart_bridge(self) -> None:
-        if self.config.usb_bridge_enabled and self.config.usb_bridge_autostart:
+        if self.config.usb_bridge_enabled and (
+            self.config.usb_bridge_autostart or self.config.auto_start
+        ):
             self.root.after(200, self.start_bridge)
 
+    def _maybe_autostart_server(self) -> None:
+        if self.config.auto_start:
+            self.root.after(200, self.start_server)
+
     def start_server(self) -> None:
-        self.save_settings()
+        self.save_settings(notify=False)
         self.controller.start()
         protocol = "https"
         self.status_var.set(
