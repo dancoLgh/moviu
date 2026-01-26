@@ -21,10 +21,11 @@ import uvicorn
 
 from .autostart import configure_autostart
 from .certs import certificates_folder, ensure_certificates, export_certificate
-from .config import AppConfig, CONFIG_DIR, load_config, save_config
+from .config import AppConfig, CONFIG_DIR, load_config, save_config, VERSION
 from .server import create_api
 from .usb_bridge import UsbBridgeController, discover_printers
 from .mdns import MoviuServiceAnnouncer
+from .updater import check_for_updates, open_release_page
 
 
 class ServerController:
@@ -173,166 +174,202 @@ class DesktopApp:
         self.bridge_status_var = tk.StringVar(value="Puente detenido")
         self.available_printers: list[str] = []
 
-        wrapper = ttk.Frame(self.root, padding=16, style="Card.TFrame")
-        wrapper.pack(fill=tk.BOTH, expand=True)
+        # Main Scrollable Container (for smaller screens)
+        main_container = ttk.Frame(self.root, style="Card.TFrame")
+        main_container.pack(fill=tk.BOTH, expand=True)
 
-        header = ttk.Frame(wrapper, style="Card.TFrame")
-        header.pack(fill=tk.X, pady=(0, 12))
-        ttk.Label(header, text="Moviu Print Server", style="Headline.TLabel").pack(
-            side=tk.LEFT
-        )
-        ttk.Label(
-            header,
-            text="API segura + Puente TCP → USB en un solo lugar",
-            style="Subhead.TLabel",
-        ).pack(side=tk.LEFT, padx=10)
+        header = ttk.Frame(main_container, padding=(20, 20, 20, 10), style="Card.TFrame")
+        header.pack(fill=tk.X)
+        ttk.Label(header, text="Moviu Print Server", style="Headline.TLabel").pack(side=tk.LEFT)
+        ttk.Label(header, text=VERSION, style="Subhead.TLabel").pack(side=tk.LEFT, padx=10, pady=(5, 0))
 
-        content = ttk.Frame(wrapper, style="Card.TFrame")
-        content.pack(fill=tk.BOTH, expand=True)
-        content.columnconfigure(0, weight=1)
-        content.columnconfigure(1, weight=1)
+        self.update_link_var = tk.StringVar(value="")
+        self.update_label = ttk.Label(header, textvariable=self.update_link_var, cursor="hand2", foreground="#38bdf8", font=("Segoe UI Bold", 9))
+        self.update_label.pack(side=tk.LEFT, padx=5, pady=(5, 0))
+        self.update_label.bind("<Button-1>", lambda e: self._on_update_click())
 
-        server_card = self._create_card(content, "Servidor HTTPS / API")
-        server_card.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        # Dashboard (Aesthetic Status)
+        dashboard = ttk.Frame(main_container, padding=20, style="Card.TFrame")
+        dashboard.pack(fill=tk.X)
+        
+        status_card = ttk.Frame(dashboard, padding=30, style="CardInner.TFrame", relief="flat")
+        status_card.pack(fill=tk.X)
+        
+        self.status_title_var = tk.StringVar(value="SERVIDOR APAGADO")
+        self.status_desc_var = tk.StringVar(value="La impresora no recibirá trabajos hasta que inicies el servidor.")
+        self.status_label = ttk.Label(status_card, textvariable=self.status_title_var, style="StatusStopped.TLabel")
+        self.status_label.pack()
+        
+        ttk.Label(status_card, textvariable=self.status_desc_var, style="Subhead.TLabel").pack(pady=(5, 15))
+        
+        btn_center = ttk.Frame(status_card, style="CardInner.TFrame")
+        btn_center.pack()
+        self.main_action_btn = ttk.Button(btn_center, text="INICIAR SERVIDOR", style="Big.TButton", command=self.start_server)
+        self.main_action_btn.pack(side=tk.LEFT, padx=10)
+        self.stop_btn = ttk.Button(btn_center, text="DETENER", style="Big.TButton", command=self.stop_server, state="disabled")
+        self.stop_btn.pack(side=tk.LEFT, padx=10)
+        ttk.Button(btn_center, text="NOVEDADES", style="Big.TButton", command=self._show_changelog).pack(side=tk.LEFT, padx=10)
 
-        bridge_card = self._create_card(content, "Puente TCP → Impresora USB")
-        bridge_card.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
+        # Tabs for Advanced Settings
+        self.notebook = ttk.Notebook(main_container)
+        self.notebook.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
 
-        # Server form
-        form = ttk.Frame(server_card, style="CardInner.TFrame")
-        form.grid(row=0, column=0, sticky="nsew")
-        form.columnconfigure(1, weight=1)
+        # Tab 1: Info & API
+        info_tab = ttk.Frame(self.notebook, padding=20)
+        self.notebook.add(info_tab, text=" Información ")
+        
+        info_grid = ttk.Frame(info_tab, style="CardInner.TFrame")
+        info_grid.pack(fill=tk.X)
+        info_grid.columnconfigure(1, weight=1)
 
-        for idx, (label, var) in enumerate(
-            (
-                ("Host servidor", self.host_var),
-                ("Puerto servidor", self.port_var),
-                ("Host impresora", self.printer_host_var),
-                ("Puerto impresora", self.printer_port_var),
-            )
-        ):
-            ttk.Label(form, text=label).grid(row=idx, column=0, sticky="w", pady=2)
-            ttk.Entry(form, textvariable=var).grid(
-                row=idx, column=1, sticky="ew", pady=2
-            )
+        self.full_url_var = tk.StringVar(value=f"https://{self.config.host}:{self.config.port}")
+        ttk.Label(info_grid, text="URL del Servidor:", font=("Segoe UI Bold", 10)).grid(row=0, column=0, sticky="w", pady=5)
+        ttk.Entry(info_grid, textvariable=self.full_url_var, state="readonly").grid(row=0, column=1, sticky="ew", padx=10)
+        
+        ttk.Label(info_grid, text="API Key:", font=("Segoe UI Bold", 10)).grid(row=1, column=0, sticky="w", pady=5)
+        ttk.Entry(info_grid, textvariable=self.api_key_var, state="readonly").grid(row=1, column=1, sticky="ew", padx=10)
+        
+        api_btns = ttk.Frame(info_tab, style="CardInner.TFrame")
+        api_btns.pack(fill=tk.X, pady=10)
+        ttk.Button(api_btns, text="Copiar API Key", command=self._copy_api_key).pack(side=tk.LEFT, padx=5)
+        ttk.Button(api_btns, text="Regenerar API Key", command=self.regenerate_api_key).pack(side=tk.LEFT, padx=5)
+        ttk.Button(api_btns, text="Buscar Actualizaciones", command=self._manual_update_check).pack(side=tk.LEFT, padx=5)
 
-        ttk.Label(form, text="Ancho (dots)").grid(row=4, column=0, sticky="w", pady=2)
-        self.width_combo = ttk.Combobox(
-            form,
-            textvariable=self.printer_width_var,
-            values=["576 (80mm)", "384 (58mm)"],
-        )
-        self.width_combo.grid(row=4, column=1, sticky="ew", pady=2)
+        # Tab 2: Configuración de Impresora
+        config_tab = ttk.Frame(self.notebook, padding=20)
+        self.notebook.add(config_tab, text=" Configuración ")
+        
+        conf_grid = ttk.Frame(config_tab, style="CardInner.TFrame")
+        conf_grid.pack(fill=tk.X)
+        conf_grid.columnconfigure(1, weight=1)
 
-        ttk.Label(form, text="API Key").grid(row=5, column=0, sticky="w", pady=2)
-        ttk.Entry(form, textvariable=self.api_key_var, state="readonly").grid(
-            row=5, column=1, sticky="ew", pady=2
-        )
+        ttk.Label(conf_grid, text="Host Impresora").grid(row=0, column=0, sticky="w", pady=5)
+        ttk.Entry(conf_grid, textvariable=self.printer_host_var).grid(row=0, column=1, sticky="ew", padx=10)
+        
+        ttk.Label(conf_grid, text="Puerto Impresora").grid(row=1, column=0, sticky="w", pady=5)
+        ttk.Entry(conf_grid, textvariable=self.printer_port_var).grid(row=1, column=1, sticky="ew", padx=10)
 
-        ttk.Checkbutton(
-            form,
-            text="Simular impresora (solo desarrollo)",
-            variable=self.simulate_var,
-        ).grid(row=6, column=0, columnspan=2, sticky="w", pady=(8, 2))
+        ttk.Label(conf_grid, text="Ancho de Papel").grid(row=2, column=0, sticky="w", pady=5)
+        self.width_combo = ttk.Combobox(conf_grid, textvariable=self.printer_width_var, values=["576 (80mm)", "384 (58mm)"], state="readonly")
+        self.width_combo.grid(row=2, column=1, sticky="ew", padx=10)
 
-        ttk.Checkbutton(
-            form,
-            text="Ejecutar al iniciar el sistema",
-            variable=self.auto_start_var,
-        ).grid(row=7, column=0, columnspan=2, sticky="w", pady=2)
+        config_check_frame = ttk.Frame(config_tab, style="CardInner.TFrame")
+        config_check_frame.pack(fill=tk.X, pady=10)
+        ttk.Checkbutton(config_check_frame, text="Simular impresora (modo prueba)", variable=self.simulate_var).pack(anchor="w")
+        ttk.Checkbutton(config_check_frame, text="Ejecutar al iniciar Windows", variable=self.auto_start_var).pack(anchor="w")
 
-        btn_frame = ttk.Frame(form, style="CardInner.TFrame")
-        btn_frame.grid(row=8, column=0, columnspan=2, pady=(10, 4))
-        for text, command in (
-            ("Guardar", self.save_settings),
-            ("Regenerar API Key", self.regenerate_api_key),
-            ("Iniciar", self.start_server),
-            ("Detener", self.stop_server),
-            ("Generar certificados", self.generate_certs),
-            ("Exportar certificado", self.export_cert),
-            ("Abrir simulaciones", self.open_simulations),
-        ):
-            ttk.Button(btn_frame, text=text, command=command).pack(
-                side=tk.LEFT, padx=4
-            )
+        ttk.Button(config_tab, text="Guardar Cambios", style="Action.TButton", command=self.save_settings).pack(pady=10)
 
-        self.status_var = tk.StringVar(value="Servidor detenido")
-        ttk.Label(form, textvariable=self.status_var, style="Status.TLabel").grid(
-            row=9, column=0, columnspan=2, sticky="w", pady=(4, 0)
-        )
+        # Tab 3: Puente USB
+        bridge_tab = ttk.Frame(self.notebook, padding=20)
+        self.notebook.add(bridge_tab, text=" Puente USB ")
+        
+        ttk.Checkbutton(bridge_tab, text="Habilitar puente TCP → USB", variable=self.bridge_enabled_var).pack(anchor="w", pady=5)
+        
+        bridge_grid = ttk.Frame(bridge_tab, style="CardInner.TFrame")
+        bridge_grid.pack(fill=tk.X, pady=10)
+        bridge_grid.columnconfigure(1, weight=1)
 
-        # Bridge form
-        bridge_form = ttk.Frame(bridge_card, style="CardInner.TFrame")
-        bridge_form.grid(row=0, column=0, sticky="nsew")
-        bridge_form.columnconfigure(1, weight=1)
+        ttk.Label(bridge_grid, text="Impresora USB").grid(row=0, column=0, sticky="w", pady=5)
+        self.printer_combo = ttk.Combobox(bridge_grid, textvariable=self.bridge_printer_var, state="readonly")
+        self.printer_combo.grid(row=0, column=1, sticky="ew", padx=10)
+        ttk.Button(bridge_grid, text="Actualizar", command=self.refresh_printers).grid(row=0, column=2)
 
-        ttk.Checkbutton(
-            bridge_form,
-            text="Habilitar puente TCP → USB",
-            variable=self.bridge_enabled_var,
-        ).grid(row=0, column=0, columnspan=2, sticky="w", pady=2)
+        ttk.Label(bridge_grid, text="Puerto TCP").grid(row=1, column=0, sticky="w", pady=5)
+        ttk.Entry(bridge_grid, textvariable=self.bridge_port_var).grid(row=1, column=1, sticky="ew", padx=10)
 
-        ttk.Label(bridge_form, text="Impresora USB").grid(
-            row=1, column=0, sticky="w", pady=2
-        )
-        self.printer_combo = ttk.Combobox(
-            bridge_form,
-            textvariable=self.bridge_printer_var,
-            values=self.available_printers,
-            state="readonly",
-        )
-        self.printer_combo.grid(row=1, column=1, sticky="ew", pady=2)
-        ttk.Button(bridge_form, text="Actualizar", command=self.refresh_printers).grid(
-            row=1, column=2, sticky="ew", padx=(6, 0)
-        )
+        ttk.Checkbutton(bridge_tab, text="Arrancar puente automáticamente", variable=self.bridge_autostart_var).pack(anchor="w")
 
-        ttk.Label(bridge_form, text="Puerto TCP").grid(
-            row=2, column=0, sticky="w", pady=2
-        )
-        ttk.Entry(bridge_form, textvariable=self.bridge_port_var).grid(
-            row=2, column=1, sticky="ew", pady=2
-        )
+        b_btns = ttk.Frame(bridge_tab, style="CardInner.TFrame")
+        b_btns.pack(pady=15)
+        ttk.Button(b_btns, text="Iniciar Puente", command=self.start_bridge).pack(side=tk.LEFT, padx=5)
+        ttk.Button(b_btns, text="Detener Puente", command=self.stop_bridge).pack(side=tk.LEFT, padx=5)
+        
+        ttk.Label(bridge_tab, textvariable=self.bridge_status_var, style="Status.TLabel").pack()
 
-        ttk.Checkbutton(
-            bridge_form,
-            text="Arrancar puente automáticamente",
-            variable=self.bridge_autostart_var,
-        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=2)
+        # Tab 4: Avanzado (SSL & Tools)
+        advanced_tab = ttk.Frame(self.notebook, padding=20)
+        self.notebook.add(advanced_tab, text=" Avanzado ")
+        
+        adv_grid = ttk.Frame(advanced_tab, style="CardInner.TFrame")
+        adv_grid.pack(fill=tk.X)
+        adv_grid.columnconfigure(1, weight=1)
 
-        bridge_buttons = ttk.Frame(bridge_form, style="CardInner.TFrame")
-        bridge_buttons.grid(row=4, column=0, columnspan=3, pady=(8, 4))
-        ttk.Button(bridge_buttons, text="Iniciar puente", command=self.start_bridge).pack(
-            side=tk.LEFT, padx=4
-        )
-        ttk.Button(bridge_buttons, text="Detener puente", command=self.stop_bridge).pack(
-            side=tk.LEFT, padx=4
-        )
+        ttk.Label(adv_grid, text="Host API").grid(row=0, column=0, sticky="w", pady=5)
+        ttk.Entry(adv_grid, textvariable=self.host_var).grid(row=0, column=1, sticky="ew", padx=10)
+        
+        ttk.Label(adv_grid, text="Puerto API").grid(row=1, column=0, sticky="w", pady=5)
+        ttk.Entry(adv_grid, textvariable=self.port_var).grid(row=1, column=1, sticky="ew", padx=10)
 
-        ttk.Label(
-            bridge_form, textvariable=self.bridge_status_var, style="Status.TLabel"
-        ).grid(row=5, column=0, columnspan=3, sticky="w", pady=(4, 0))
+        tools_frame = ttk.LabelFrame(advanced_tab, text="Herramientas", padding=10)
+        tools_frame.pack(fill=tk.X, pady=20)
+        
+        for text, cmd in [
+            ("Generar Certificados SSL", self.generate_certs),
+            ("Exportar Certificado (.crt)", self.export_cert),
+            ("Abrir Carpeta de Simulaciones", self.open_simulations),
+        ]:
+            ttk.Button(tools_frame, text=text, command=cmd).pack(fill=tk.X, pady=2)
 
-        # Log section
-        log_frame = ttk.LabelFrame(wrapper, text="Logs", style="Card.TLabelframe")
-        log_frame.pack(fill=tk.BOTH, expand=True, pady=(12, 0))
-        log_frame.rowconfigure(0, weight=1)
-        log_frame.columnconfigure(0, weight=1)
+        # Tab 5: Logs
+        log_tab = ttk.Frame(self.notebook, padding=5)
+        self.notebook.add(log_tab, text=" Logs ")
+        
         self.log_widget = tk.Text(
-            log_frame,
-            height=12,
+            log_tab,
+            height=15,
             state="disabled",
             bg="#0b1220",
-            fg="#e2e8f0",
+            fg="#94a3b8",
             insertbackground="#e2e8f0",
             relief="flat",
-            font=("Segoe UI", 10),
+            font=("Consolas", 10),
         )
-        self.log_widget.grid(row=0, column=0, sticky="nsew")
-        scrollbar = ttk.Scrollbar(log_frame, command=self.log_widget.yview)
-        scrollbar.grid(row=0, column=1, sticky="ns")
+        self.log_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar = ttk.Scrollbar(log_tab, command=self.log_widget.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.log_widget.configure(yscrollcommand=scrollbar.set)
         self.log_handler.attach(self.log_widget)
+
         self.refresh_printers(initial=True)
+        self.root.after(3000, self._background_update_check)
+
+    def _background_update_check(self) -> None:
+        """Check for updates in a background thread."""
+        def _target():
+            available, version, url = check_for_updates()
+            if available and url:
+                self.latest_update_url = url
+                self.root.after(0, lambda: self.update_link_var.set(f"¡Nueva versión disponible: {version}!"))
+        
+        threading.Thread(target=_target, daemon=True).start()
+
+    def _manual_update_check(self) -> None:
+        """Manually trigger an update check with a popup."""
+        available, version, url = check_for_updates()
+        if available and url:
+            if messagebox.askyesno("Actualización disponible", f"Hay una nueva versión disponible: {version}\n¿Deseas descargarla ahora?"):
+                open_release_page(url)
+        else:
+            messagebox.showinfo("Actualización", "Ya tienes la última versión instalada.")
+
+    def _on_update_click(self) -> None:
+        if hasattr(self, 'latest_update_url'):
+            open_release_page(self.latest_update_url)
+
+    def _show_changelog(self) -> None:
+        """Open the changelog file or the GitHub releases page."""
+        changelog_path = Path(__file__).parent.parent / "CHANGELOG.md"
+        if changelog_path.exists():
+            try:
+                if os.name == "nt":
+                    os.startfile(changelog_path)
+                else:
+                    webbrowser.open(str(changelog_path))
+            except Exception:
+                open_release_page(f"https://github.com/dancoLgh/moviu/releases")
+        else:
+            open_release_page(f"https://github.com/dancoLgh/moviu/releases")
 
     def _create_card(self, parent: ttk.Frame, title: str) -> ttk.Labelframe:
         card = ttk.Labelframe(parent, text=title, style="Card.TLabelframe")
@@ -441,16 +478,27 @@ class DesktopApp:
     def start_server(self) -> None:
         self.save_settings(notify=False)
         self.controller.start()
-        protocol = "https"
-        self.status_var.set(
-            f"Servidor escuchando en {protocol}://{self.config.host}:{self.config.port}"
-        )
+        self.status_title_var.set("SERVIDOR ACTIVO")
+        self.status_desc_var.set(f"Recibiendo trabajos en https://{self.config.host}:{self.config.port}")
+        self.status_label.configure(style="StatusRunning.TLabel")
+        self.main_action_btn.configure(state="disabled")
+        self.stop_btn.configure(state="normal")
+        self.full_url_var.set(f"https://{self.config.host}:{self.config.port}")
         logging.info("Servidor iniciado con SSL")
 
     def stop_server(self) -> None:
         self.controller.stop()
-        self.status_var.set("Servidor detenido")
+        self.status_title_var.set("SERVIDOR APAGADO")
+        self.status_desc_var.set("La impresora no recibirá trabajos hasta que inicies el servidor.")
+        self.status_label.configure(style="StatusStopped.TLabel")
+        self.main_action_btn.configure(state="normal")
+        self.stop_btn.configure(state="disabled")
         logging.info("Servidor detenido")
+
+    def _copy_api_key(self) -> None:
+        self.root.clipboard_clear()
+        self.root.clipboard_append(self.api_key_var.get())
+        messagebox.showinfo("Copiado", "API Key copiada al portapapeles")
 
     def _do_exit(self) -> None:
         self.stop_server()
@@ -563,7 +611,10 @@ class DesktopApp:
         style.configure("TLabel", background="#0f172a", foreground="#e2e8f0")
         style.configure("Headline.TLabel", font=("Segoe UI Semibold", 18), foreground="#f8fafc")
         style.configure("Subhead.TLabel", font=("Segoe UI", 11), foreground="#94a3b8")
-        style.configure("Status.TLabel", foreground="#38bdf8")
+        style.configure("Status.TLabel", foreground="#38bdf8", font=("Segoe UI", 11))
+        style.configure("StatusRunning.TLabel", foreground="#22c55e", font=("Segoe UI Bold", 24))
+        style.configure("StatusStopped.TLabel", foreground="#ef4444", font=("Segoe UI Bold", 24))
+        
         style.configure(
             "TButton",
             background="#1d4ed8",
@@ -575,6 +626,10 @@ class DesktopApp:
             background=[("active", "#2563eb")],
             relief=[("pressed", "groove")],
         )
+        
+        style.configure("Action.TButton", font=("Segoe UI Semibold", 10), padding=10)
+        style.configure("Big.TButton", font=("Segoe UI Bold", 12), padding=12)
+
         style.configure("Card.TLabelframe", background="#0f172a", foreground="#cbd5e1")
         style.configure(
             "Card.TLabelframe.Label",
@@ -582,6 +637,13 @@ class DesktopApp:
             foreground="#cbd5e1",
             font=("Segoe UI Semibold", 11),
         )
+        
+        # Notebook styling
+        style.configure("TNotebook", background="#0f172a", borderwidth=0)
+        style.configure("TNotebook.Tab", background="#1e293b", foreground="#94a3b8", padding=[12, 4])
+        style.map("TNotebook.Tab", 
+                  background=[("selected", "#0f172a")],
+                  foreground=[("selected", "#38bdf8")])
 
     def _configure_window_hooks(self) -> None:
         self.root.protocol("WM_DELETE_WINDOW", self._minimize_to_background)

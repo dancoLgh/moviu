@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 import logging
-from typing import Optional
+from typing import Optional, Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,8 +30,8 @@ class PrinterSettings(BaseModel):
 
 
 class PrintRequest(BaseModel):
-    mode: str = Field("html", description="html | image | pdf | raw | raw_text | zpl")
-    content: str = Field(..., description="Payload del trabajo")
+    mode: str = Field("html", description="html | image | pdf | raw | raw_text | zpl | hybrid")
+    content: Any = Field(..., description="Payload del trabajo (string, base64, o dict para hybrid)")
     printer: Optional[PrinterSettings] = None
     code_page: Optional[str] = Field(
         None,
@@ -169,9 +169,15 @@ def create_api(config: AppConfig) -> FastAPI:
             if request.simulate is not None
             else config.simulate_printer
         )
+        # Ensure content is passed as string to PrintJob
+        content = request.content
+        if isinstance(content, (dict, list)):
+            import json
+            content = json.dumps(content)
+
         job = PrintJob(
-            mode=request.mode,
-            content=request.content,
+            mode=request.mode, # type: ignore
+            content=content,
             printer_host=printer_host or config.printer_host,
             printer_port=printer_port or config.printer_port,
             code_page=request.code_page,

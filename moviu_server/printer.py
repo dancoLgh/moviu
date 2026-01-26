@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import io
+import json
 import logging
 import re
 import socket
@@ -20,7 +21,7 @@ from .html_renderer import html_to_image
 
 @dataclass
 class PrintJob:
-    mode: Literal["html", "image", "pdf", "raw", "raw_text", "zpl"]
+    mode: Literal["html", "image", "pdf", "raw", "raw_text", "zpl", "hybrid"]
     content: str
     printer_host: str
     printer_port: int
@@ -91,6 +92,32 @@ class PrintProcessor:
         elif job.mode == "pdf":
             image = self._decode_pdf(job.content)
             preview = {"image": image}
+        elif job.mode == "hybrid":
+            # Hybrid mode: content is JSON with {image: "...", commands: "..."}
+            try:
+                data = json.loads(job.content)
+                image_data = data.get("image")
+                commands_data = data.get("commands")
+
+                if not image_data or not commands_data:
+                    raise PrinterError("Modo hybrid requiere 'image' y 'commands' en el JSON")
+
+                # Process image (no cut)
+                image = self._decode_image(image_data)
+                if image.width > self.width:
+                    ratio = self.width / image.width
+                    new_height = int(image.height * ratio)
+                    image = image.resize((self.width, new_height), Image.Resampling.LANCZOS)
+                
+                image_payload = image_to_escpos(image, cut=False)
+                
+                # Process commands
+                commands_payload = self._decode_raw(commands_data)
+                
+                preview = {"image": image, "commands_hex": commands_payload.hex()}
+                return image_payload + commands_payload, preview
+            except json.JSONDecodeError as exc:
+                raise PrinterError(f"Contenido hybrid inválido (debe ser JSON): {exc}") from exc
         else:
             raise PrinterError(f"Modo no soportado: {job.mode}")
         return image_to_escpos(image), preview
@@ -181,9 +208,14 @@ class PrintProcessor:
                 _, b64_data = data.split(",", 1)
                 raw = base64.b64decode(b64_data)
             else:
-                raw = base64.b64decode(data)
+                stripped = data.strip()
+                try:
+                    # Try hex first as it's more specific
+                    raw = bytes.fromhex(stripped)
+                except ValueError:
+                    raw = base64.b64decode(stripped)
         except Exception as exc:  # noqa: BLE001
-            raise PrinterError("La imagen debe estar codificada en base64") from exc
+            raise PrinterError("La imagen debe estar codificada en base64 o hexadecimal") from exc
         return Image.open(io.BytesIO(raw))
 
     def _decode_pdf(self, data: str) -> Image.Image:

@@ -10,6 +10,7 @@ Servidor de impresión local para convertir HTML → imagen → ESC/POS y expone
   - `html` / `image` — Impresoras térmicas (ESC/POS)
   - `pdf` — Modo unificado: impresoras térmicas (red) o del sistema (local)
   - `raw` / `raw_text` — Comandos ESC/POS directos
+  - `hybrid` — Cabecera con imagen + comandos ESC/POS personalizados
   - `zpl` — Impresoras de etiquetas Zebra
 - Enrutamiento a impresoras de red vía TCP o impresoras locales por nombre.
 - Modo de simulación que guarda trabajos en disco para desarrollo.
@@ -87,6 +88,31 @@ El modo `raw_text` interpreta las secuencias de escape (\n, \t, \x1b, etc.) sin 
 ```
 
 Code pages soportadas para `raw_text`: `cp437` (ESC t 0), `cp850` (ESC t 2), `cp860` (ESC t 3), `cp863` (ESC t 4), `cp865` (ESC t 5), `cp1252`/`latin-1` (ESC t 6), `cp866` (ESC t 7), `cp852` (ESC t 8) y `cp858` (ESC t 9). Si pasas una no soportada, la API devuelve error de validación.
+
+### Imprimir en modo híbrido (Imagen + RAW)
+
+El modo `hybrid` permite enviar una imagen (cabecera) y comandos ESC/POS seguidos en un mismo trabajo, sin cortar el papel entre ellos. El `content` debe ser un objeto JSON con `image` y `commands` (ambos en base64 o hexadecimal):
+
+```json
+{
+  "mode": "hybrid",
+  "content": "{\"image\": \"data:image/png;base64,...\", \"commands\": \"1b4068656c6c6f0a1d5630\"}"
+}
+```
+
+O enviando el JSON directamente como cadena:
+
+```json
+{
+  "mode": "hybrid",
+  "content": {
+    "image": "iVBORw0KGgoAAAANSUhEUg...",
+    "commands": "G0BIZWxsbwoXVjA="
+  }
+}
+```
+
+> Nota: Si el cliente envía un objeto JSON real en `content` en lugar de una cadena, el servidor lo procesará correctamente siempre que la API lo reciba como string deserializado.
 
 ### Imprimir PDFs (modo unificado)
 
