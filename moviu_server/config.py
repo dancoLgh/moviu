@@ -10,7 +10,7 @@ from typing import Optional
 
 CONFIG_DIR = Path.home() / ".moviu_printer"
 CONFIG_FILE = CONFIG_DIR / "config.json"
-VERSION = "1.0.0"
+VERSION = "1.0.2"
 
 
 @dataclass
@@ -31,6 +31,7 @@ class AppConfig:
     usb_bridge_autostart: bool = False
     ssl_cert_path: str = str(CONFIG_DIR / "cert.pem")
     ssl_key_path: str = str(CONFIG_DIR / "key.pem")
+    github_token: str = ""
 
     @classmethod
     def from_dict(cls, data: Optional[dict]) -> "AppConfig":
@@ -52,6 +53,7 @@ class AppConfig:
             ),
             ssl_cert_path=data.get("ssl_cert_path", str(cls.ssl_cert_path)),
             ssl_key_path=data.get("ssl_key_path", str(cls.ssl_key_path)),
+            github_token=data.get("github_token", cls.github_token),
         )
 
 

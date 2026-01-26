@@ -13,14 +13,14 @@ GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
 logger = logging.getLogger(__name__)
 
-def get_latest_release_info() -> Optional[Dict]:
+def get_latest_release_info(token: Optional[str] = None) -> Optional[Dict]:
     """Fetch the latest release information from GitHub."""
     try:
-        # User-Agent is required by GitHub API
-        request = urllib.request.Request(
-            GITHUB_API_URL, 
-            headers={"User-Agent": "Moviu-Print-Server-Updater"}
-        )
+        headers = {"User-Agent": "Moviu-Print-Server-Updater"}
+        if token:
+            headers["Authorization"] = f"token {token}"
+            
+        request = urllib.request.Request(GITHUB_API_URL, headers=headers)
         with urllib.request.urlopen(request, timeout=5) as response:
             if response.status == 200:
                 return json.loads(response.read().decode())
@@ -28,12 +28,12 @@ def get_latest_release_info() -> Optional[Dict]:
         logger.error(f"Error checking for updates: {e}")
     return None
 
-def check_for_updates() -> tuple[bool, Optional[str], Optional[str]]:
+def check_for_updates(token: Optional[str] = None) -> tuple[bool, Optional[str], Optional[str]]:
     """
     Check if a newer version is available.
     Returns: (is_update_available, latest_version, download_url)
     """
-    info = get_latest_release_info()
+    info = get_latest_release_info(token)
     if not info:
         return False, None, None
     

@@ -7,6 +7,7 @@ import os
 import re
 import signal
 import subprocess
+import socket
 import sys
 import threading
 import tkinter as tk
@@ -153,9 +154,48 @@ class DesktopApp:
             on_show=self._restore_from_tray,
             on_exit=lambda: self.root.after(0, self._do_exit),
         )
+        self._check_single_instance()
         self._apply_autostart(self.config.auto_start, notify=False)
         self._maybe_autostart_server()
         self._maybe_autostart_bridge()
+
+    def _check_single_instance(self) -> None:
+        """Prevent multiple instances and bring the existing one to focus."""
+        self.instance_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.instance_port = 29170  # Dedicated port for instance signaling
+        
+        try:
+            # Try to bind to the port
+            self.instance_socket.bind(('127.0.0.1', self.instance_port))
+            self.instance_socket.listen(1)
+            
+            # If successful, start a listener thread to handle 'show' signals
+            def listen_for_other_instances():
+                while True:
+                    try:
+                        conn, _ = self.instance_socket.accept()
+                        data = conn.recv(1024).decode('utf-8')
+                        if data == "SHOW":
+                            self._restore_from_tray()
+                        conn.close()
+                    except Exception:
+                        break
+            
+            threading.Thread(target=listen_for_other_instances, daemon=True).start()
+            
+        except socket.error:
+            # Another instance is already running
+            try:
+                # Signal the existing instance to show itself
+                client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                client.connect(('127.0.0.1', self.instance_port))
+                client.sendall(b"SHOW")
+                client.close()
+            except Exception:
+                pass
+            
+            # Exit the current instance
+            sys.exit(0)
 
     def _build_ui(self) -> None:
         self.host_var = tk.StringVar(value=self.config.host)
@@ -172,6 +212,7 @@ class DesktopApp:
         self.bridge_printer_var = tk.StringVar(value=self.config.usb_bridge_printer)
         self.bridge_autostart_var = tk.BooleanVar(value=self.config.usb_bridge_autostart)
         self.bridge_status_var = tk.StringVar(value="Puente detenido")
+        self.github_token_var = tk.StringVar(value=self.config.github_token)
         self.available_printers: list[str] = []
 
         # Main Scrollable Container (for smaller screens)
@@ -301,6 +342,9 @@ class DesktopApp:
         ttk.Label(adv_grid, text="Puerto API").grid(row=1, column=0, sticky="w", pady=5)
         ttk.Entry(adv_grid, textvariable=self.port_var).grid(row=1, column=1, sticky="ew", padx=10)
 
+        ttk.Label(adv_grid, text="GitHub Token (Private)").grid(row=2, column=0, sticky="w", pady=5)
+        ttk.Entry(adv_grid, textvariable=self.github_token_var, show="*").grid(row=2, column=1, sticky="ew", padx=10)
+
         tools_frame = ttk.LabelFrame(advanced_tab, text="Herramientas", padding=10)
         tools_frame.pack(fill=tk.X, pady=20)
         
@@ -337,7 +381,7 @@ class DesktopApp:
     def _background_update_check(self) -> None:
         """Check for updates in a background thread."""
         def _target():
-            available, version, url = check_for_updates()
+            available, version, url = check_for_updates(self.config.github_token)
             if available and url:
                 self.latest_update_url = url
                 self.root.after(0, lambda: self.update_link_var.set(f"¡Nueva versión disponible: {version}!"))
@@ -346,7 +390,7 @@ class DesktopApp:
 
     def _manual_update_check(self) -> None:
         """Manually trigger an update check with a popup."""
-        available, version, url = check_for_updates()
+        available, version, url = check_for_updates(self.config.github_token)
         if available and url:
             if messagebox.askyesno("Actualización disponible", f"Hay una nueva versión disponible: {version}\n¿Deseas descargarla ahora?"):
                 open_release_page(url)
@@ -358,18 +402,28 @@ class DesktopApp:
             open_release_page(self.latest_update_url)
 
     def _show_changelog(self) -> None:
-        """Open the changelog file or the GitHub releases page."""
-        changelog_path = Path(__file__).parent.parent / "CHANGELOG.md"
-        if changelog_path.exists():
-            try:
-                if os.name == "nt":
-                    os.startfile(changelog_path)
+        """Fetch latest notes from GitHub or fall back to local CHANGELOG.md."""
+        def _fetch():
+            from .updater import get_latest_release_info
+            info = get_latest_release_info(self.config.github_token)
+            
+            if info and info.get("body"):
+                content = info["body"]
+                title = f"Novedades - {info.get('tag_name', 'Última Versión')}"
+                self.root.after(0, lambda: ReleaseNotesDialog(self.root, title, content))
+            else:
+                # Fallback to local file
+                changelog_path = Path(__file__).parent.parent / "CHANGELOG.md"
+                if changelog_path.exists():
+                    try:
+                        content = changelog_path.read_text(encoding="utf-8")
+                        self.root.after(0, lambda: ReleaseNotesDialog(self.root, "Novedades (Local)", content))
+                    except Exception:
+                        self.root.after(0, lambda: open_release_page("https://github.com/dancoLgh/moviu/releases"))
                 else:
-                    webbrowser.open(str(changelog_path))
-            except Exception:
-                open_release_page(f"https://github.com/dancoLgh/moviu/releases")
-        else:
-            open_release_page(f"https://github.com/dancoLgh/moviu/releases")
+                    self.root.after(0, lambda: open_release_page("https://github.com/dancoLgh/moviu/releases"))
+        
+        threading.Thread(target=_fetch, daemon=True).start()
 
     def _create_card(self, parent: ttk.Frame, title: str) -> ttk.Labelframe:
         card = ttk.Labelframe(parent, text=title, style="Card.TLabelframe")
@@ -398,6 +452,7 @@ class DesktopApp:
             self.config.usb_bridge_port = int(self.bridge_port_var.get())
             self.config.usb_bridge_printer = self.bridge_printer_var.get()
             self.config.usb_bridge_autostart = self.bridge_autostart_var.get()
+            self.config.github_token = self.github_token_var.get()
             save_config(self.config)
             self._apply_autostart(self.config.auto_start, notify=notify)
             if notify:
@@ -700,6 +755,84 @@ class DesktopApp:
                 estado = "activado" if enabled else "desactivado"
                 logging.info("Autoinicio %s", estado)
 
+
+class ReleaseNotesDialog(tk.Toplevel):
+    """A dialog to display release notes with formatted Markdown support."""
+    def __init__(self, parent, title, content):
+        super().__init__(parent)
+        self.title(title)
+        self.geometry("700x600")
+        self.configure(bg="#0f172a")
+        
+        self.transient(parent)
+        self.grab_set()
+        
+        frame = ttk.Frame(self, padding=20)
+        frame.pack(fill=tk.BOTH, expand=True)
+        
+        ttk.Label(frame, text=title, font=("Segoe UI Bold", 16)).pack(pady=(0, 20))
+        
+        text_area = tk.Text(
+            frame, 
+            wrap=tk.WORD, 
+            bg="#0f172a", 
+            fg="#cbd5e1", 
+            font=("Segoe UI", 11),
+            relief="flat",
+            padx=15,
+            pady=15,
+            borderwidth=0,
+            highlightthickness=0
+        )
+        
+        # Configure tags for Markdown-like formatting
+        text_area.tag_configure("h1", font=("Segoe UI Bold", 20), foreground="#f8fafc", spacing1=15, spacing3=10)
+        text_area.tag_configure("h2", font=("Segoe UI Bold", 16), foreground="#f8fafc", spacing1=12, spacing3=8)
+        text_area.tag_configure("h3", font=("Segoe UI Bold", 13), foreground="#f8fafc", spacing1=10, spacing3=5)
+        text_area.tag_configure("bold", font=("Segoe UI Bold", 11), foreground="#f1f5f9")
+        text_area.tag_configure("bullet", lmargin1=20, lmargin2=40, spacing1=5)
+        
+        # Parse and insert content
+        for line in content.split('\n'):
+            stripped = line.strip()
+            if not stripped:
+                text_area.insert(tk.END, "\n")
+                continue
+                
+            if line.startswith('# '):
+                text_area.insert(tk.END, line[2:] + "\n", "h1")
+            elif line.startswith('## '):
+                text_area.insert(tk.END, line[3:] + "\n", "h2")
+            elif line.startswith('### '):
+                text_area.insert(tk.END, line[4:] + "\n", "h3")
+            elif stripped.startswith('- ') or stripped.startswith('* '):
+                self._insert_formatted(text_area, "  • " + stripped[2:] + "\n", "bullet")
+            else:
+                self._insert_formatted(text_area, line + "\n")
+        
+        text_area.configure(state="disabled")
+        text_area.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        scrollbar = ttk.Scrollbar(frame, command=text_area.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        text_area.configure(yscrollcommand=scrollbar.set)
+        
+        btn_frame = ttk.Frame(self, padding=10)
+        btn_frame.pack(fill=tk.X)
+        ttk.Button(btn_frame, text="Cerrar", command=self.destroy).pack(side=tk.RIGHT, padx=10)
+
+    def _insert_formatted(self, widget, text, extra_tag=None):
+        """Helper to insert text and handle inline bold markers (**text**)."""
+        import re
+        parts = re.split(r'(\*\*.*?\*\*)', text)
+        for part in parts:
+            if not part: continue
+            tags = [extra_tag] if extra_tag else []
+            if part.startswith('**') and part.endswith('**'):
+                tags.append("bold")
+                widget.insert(tk.END, part[2:-2], tuple(tags))
+            else:
+                widget.insert(tk.END, part, tuple(tags))
 
 class _TextHandler(logging.Handler):
     """Send log records to a Tkinter Text widget."""

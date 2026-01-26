@@ -2,6 +2,17 @@
 
 Todos los cambios notables en este proyecto serán documentados en este archivo.
 
+## [1.0.2] - 2026-01-25
+
+### Añadido
+- **Soporte para Repositorios Privados**: Opción para configurar un GitHub Token y permitir actualizaciones desde repositorios privados.
+- **Formateo Markdown en Novedades**: Las notas de versión ahora se muestran con formato enriquecido (títulos, negritas, listas).
+- **Instancia Única**: El programa ahora detecta si ya se está ejecutando y trae la ventana existente al primer plano en lugar de abrir una nueva.
+
+### Mejorado
+- **Interfaz Avanzada**: Nuevo campo para el GitHub Token en la pestaña de configuración avanzada.
+- **Diálogo de Novedades**: Mejora en el tamaño y espaciado de la ventana de visualización de cambios.
+
 ## [1.0.1] - 2026-01-25
 
 ### Añadido
