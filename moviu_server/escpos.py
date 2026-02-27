@@ -8,7 +8,7 @@ from typing import Iterable
 from PIL import Image
 
 
-def image_to_escpos(image: Image.Image, cut: bool = True, chunk_height: int = 128) -> bytes:
+def image_to_escpos(image: Image.Image, cut: bool = True, chunk_height: int = 128, gamma: float = 1.0) -> bytes:
     """Convert a Pillow image into ESC/POS raster bytes using intelligent chunking."""
 
     # Handle transparency: composite onto a white background to avoid black blobs
@@ -20,6 +20,13 @@ def image_to_escpos(image: Image.Image, cut: bool = True, chunk_height: int = 12
         grayscale = background.convert("L")
     else:
         grayscale = image.convert("L")
+
+    # Apply gamma correction if needed
+    if gamma != 1.0:
+        # O = 255 * (I/255)^(1/gamma)
+        inv_gamma = 1.0 / gamma
+        lut = [pow(i / 255.0, inv_gamma) * 255.0 for i in range(256)]
+        grayscale = grayscale.point(lut)
 
     bw = grayscale.point(lambda x: 0 if x < 128 else 255, "1")
     width = bw.width

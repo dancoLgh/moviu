@@ -17,12 +17,13 @@ VERSION = "1.0.2"
 class AppConfig:
     """Configuration for the local printing server."""
 
-    host: str = "127.0.0.1"
+    host: str = "0.0.0.0"
     port: int = 9000
     api_key: str = secrets.token_hex(16)
     printer_host: str = "192.168.0.100"
     printer_port: int = 9100
     printer_width: int = 576
+    printer_gamma: int = 500
     simulate_printer: bool = False
     auto_start: bool = False
     usb_bridge_enabled: bool = False
@@ -36,13 +37,19 @@ class AppConfig:
     @classmethod
     def from_dict(cls, data: Optional[dict]) -> "AppConfig":
         data = data or {}
+        host = data.get("host", cls.host)
+        # Migrate 127.0.0.1 to 0.0.0.0 to enable network access by default
+        if host == "127.0.0.1":
+            host = "0.0.0.0"
+
         return cls(
-            host=data.get("host", cls.host),
+            host=host,
             port=int(data.get("port", cls.port)),
             api_key=data.get("api_key", secrets.token_hex(16)),
             printer_host=data.get("printer_host", cls.printer_host),
             printer_port=int(data.get("printer_port", cls.printer_port)),
             printer_width=int(data.get("printer_width", cls.printer_width)),
+            printer_gamma=int(data.get("printer_gamma", cls.printer_gamma)),
             simulate_printer=bool(data.get("simulate_printer", cls.simulate_printer)),
             auto_start=bool(data.get("auto_start", cls.auto_start)),
             usb_bridge_enabled=bool(data.get("usb_bridge_enabled", cls.usb_bridge_enabled)),

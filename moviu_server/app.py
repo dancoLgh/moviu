@@ -21,11 +21,11 @@ from PIL import Image, ImageDraw, ImageFont
 import uvicorn
 
 from .autostart import configure_autostart
-from .certs import certificates_folder, ensure_certificates, export_certificate
+from .certs import certificates_folder, ensure_certificates, export_certificate, install_certificate_in_system
 from .config import AppConfig, CONFIG_DIR, load_config, save_config, VERSION
 from .server import create_api
 from .usb_bridge import UsbBridgeController, discover_printers
-from .mdns import MoviuServiceAnnouncer
+from .mdns import MoviuServiceAnnouncer, get_local_ip
 from .updater import check_for_updates, open_release_page
 
 
@@ -42,10 +42,15 @@ class ServerController:
         if self.server and self.server.started:
             return
         _ensure_streams()
-        app = create_api(self.config)
+        # Generate certificate for localhost, internal IP and configured host
+        cert_hosts = ["localhost", "127.0.0.1", get_local_ip()]
+        if self.config.host not in ("0.0.0.0", "127.0.0.1", "localhost"):
+            cert_hosts.append(self.config.host)
+            
         cert_path, key_path = ensure_certificates(
-            Path(self.config.ssl_cert_path), Path(self.config.ssl_key_path), self.config.host
+            Path(self.config.ssl_cert_path), Path(self.config.ssl_key_path), cert_hosts
         )
+        app = create_api(self.config)
         uvicorn_config = uvicorn.Config(
             app,
             host=self.config.host,
@@ -203,6 +208,13 @@ class DesktopApp:
         self.printer_host_var = tk.StringVar(value=self.config.printer_host)
         self.printer_port_var = tk.StringVar(value=str(self.config.printer_port))
         self.printer_width_var = tk.StringVar(value=str(self.config.printer_width))
+        self.printer_gamma_var = tk.IntVar(value=self.config.printer_gamma)
+        self.printer_gamma_str = tk.StringVar(value=str(self.config.printer_gamma))
+        
+        def _update_gamma_str(*args):
+            self.printer_gamma_str.set(str(self.printer_gamma_var.get()))
+        self.printer_gamma_var.trace_add("write", _update_gamma_str)
+
         self.api_key_var = tk.StringVar(value=self.config.api_key)
         self.simulate_var = tk.BooleanVar(value=self.config.simulate_printer)
         self.auto_start_var = tk.BooleanVar(value=self.config.auto_start)
@@ -263,7 +275,8 @@ class DesktopApp:
         info_grid.pack(fill=tk.X)
         info_grid.columnconfigure(1, weight=1)
 
-        self.full_url_var = tk.StringVar(value=f"https://{self.config.host}:{self.config.port}")
+        display_host = self.config.host if self.config.host != "0.0.0.0" else get_local_ip()
+        self.full_url_var = tk.StringVar(value=f"https://{display_host}:{self.config.port}")
         ttk.Label(info_grid, text="URL del Servidor:", font=("Segoe UI Bold", 10)).grid(row=0, column=0, sticky="w", pady=5)
         ttk.Entry(info_grid, textvariable=self.full_url_var, state="readonly").grid(row=0, column=1, sticky="ew", padx=10)
         
@@ -293,6 +306,10 @@ class DesktopApp:
         ttk.Label(conf_grid, text="Ancho de Papel").grid(row=2, column=0, sticky="w", pady=5)
         self.width_combo = ttk.Combobox(conf_grid, textvariable=self.printer_width_var, values=["576 (80mm)", "384 (58mm)"], state="readonly")
         self.width_combo.grid(row=2, column=1, sticky="ew", padx=10)
+
+        ttk.Label(conf_grid, text="Oscuridad (Densidad)").grid(row=3, column=0, sticky="w", pady=5)
+        ttk.Scale(conf_grid, variable=self.printer_gamma_var, from_=200, to=1000, orient=tk.HORIZONTAL).grid(row=3, column=1, sticky="ew", padx=10)
+        ttk.Label(conf_grid, textvariable=self.printer_gamma_str, width=4).grid(row=3, column=2, sticky="w")
 
         config_check_frame = ttk.Frame(config_tab, style="CardInner.TFrame")
         config_check_frame.pack(fill=tk.X, pady=10)
@@ -350,6 +367,7 @@ class DesktopApp:
         
         for text, cmd in [
             ("Generar Certificados SSL", self.generate_certs),
+            ("Instalar Certificado en Windows (esta PC)", self.install_cert_locally),
             ("Exportar Certificado (.crt)", self.export_cert),
             ("Abrir Carpeta de Simulaciones", self.open_simulations),
         ]:
@@ -446,6 +464,7 @@ class DesktopApp:
             else:
                 self.config.printer_width = int(width_str)
 
+            self.config.printer_gamma = int(self.printer_gamma_var.get())
             self.config.simulate_printer = self.simulate_var.get()
             self.config.auto_start = self.auto_start_var.get()
             self.config.usb_bridge_enabled = self.bridge_enabled_var.get()
@@ -533,13 +552,14 @@ class DesktopApp:
     def start_server(self) -> None:
         self.save_settings(notify=False)
         self.controller.start()
+        display_host = self.config.host if self.config.host != "0.0.0.0" else get_local_ip()
         self.status_title_var.set("SERVIDOR ACTIVO")
-        self.status_desc_var.set(f"Recibiendo trabajos en https://{self.config.host}:{self.config.port}")
+        self.status_desc_var.set(f"Recibiendo trabajos en https://{display_host}:{self.config.port}")
         self.status_label.configure(style="StatusRunning.TLabel")
         self.main_action_btn.configure(state="disabled")
         self.stop_btn.configure(state="normal")
-        self.full_url_var.set(f"https://{self.config.host}:{self.config.port}")
-        logging.info("Servidor iniciado con SSL")
+        self.full_url_var.set(f"https://{display_host}:{self.config.port}")
+        logging.info("Servidor iniciado con SSL en %s", display_host)
 
     def stop_server(self) -> None:
         self.controller.stop()
@@ -590,8 +610,15 @@ class DesktopApp:
         self.root.after(0, _show)
 
     def generate_certs(self) -> None:
+        cert_hosts = ["localhost", "127.0.0.1", get_local_ip()]
+        if self.config.host not in ("0.0.0.0", "127.0.0.1", "localhost"):
+            cert_hosts.append(self.config.host)
+
         cert_path, key_path = ensure_certificates(
-            Path(self.config.ssl_cert_path), Path(self.config.ssl_key_path), self.config.host
+            Path(self.config.ssl_cert_path), 
+            Path(self.config.ssl_key_path), 
+            cert_hosts,
+            force=True
         )
         messagebox.showinfo(
             "Certificados",
@@ -600,8 +627,12 @@ class DesktopApp:
         logging.info("Certificados SSL generados")
 
     def export_cert(self) -> None:
+        cert_hosts = ["localhost", "127.0.0.1", get_local_ip()]
+        if self.config.host not in ("0.0.0.0", "127.0.0.1", "localhost"):
+            cert_hosts.append(self.config.host)
+
         cert_path, _ = ensure_certificates(
-            Path(self.config.ssl_cert_path), Path(self.config.ssl_key_path), self.config.host
+            Path(self.config.ssl_cert_path), Path(self.config.ssl_key_path), cert_hosts
         )
         dest = filedialog.asksaveasfilename(
             defaultextension=".crt",
@@ -614,6 +645,25 @@ class DesktopApp:
             export_certificate(Path(dest), cert_path)
             messagebox.showinfo("Exportar certificado", f"Certificado copiado a\n{dest}")
             logging.info("Certificado exportado a %s", dest)
+
+    def install_cert_locally(self) -> None:
+        cert_path = Path(self.config.ssl_cert_path)
+        if not cert_path.exists():
+            self.generate_certs()
+        
+        if install_certificate_in_system(cert_path):
+            messagebox.showinfo(
+                "Instalar Certificado",
+                "Certificado instalado correctamente en el almacén de confianza de Windows.\n\n"
+                "Ahora los navegadores de esta PC deberían confiar en la conexión HTTPS."
+            )
+            logging.info("Certificado SSL instalado en el sistema local")
+        else:
+            messagebox.showerror(
+                "Error",
+                "No se pudo instalar el certificado automáticamente.\n"
+                "Intenta ejecutar la aplicación como administrador o instala el certificado manualmente usando el botón 'Exportar'."
+            )
 
     def open_simulations(self) -> None:
         sims = CONFIG_DIR / "simulated_jobs"

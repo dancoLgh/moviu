@@ -27,6 +27,7 @@ class PrintJob:
     printer_port: int
     auto_cut: bool = True
     code_page: Optional[str] = None
+    gamma: Optional[int] = None
 
 
 class PrinterError(RuntimeError):
@@ -36,11 +37,31 @@ class PrinterError(RuntimeError):
 class PrintProcessor:
     """Handle conversions and network transmission."""
 
-    def __init__(self, default_host: str, default_port: int, width: int = 576, simulate: bool = False) -> None:
+    def __init__(
+        self,
+        default_host: str,
+        default_port: int,
+        width: int = 576,
+        gamma: int = 500,
+        simulate: bool = False,
+    ) -> None:
         self.default_host = default_host
         self.default_port = default_port
         self.width = width
+        self.gamma_config = gamma
         self.simulate = simulate
+
+    def _get_actual_gamma(self, user_gamma: Optional[int]) -> float:
+        """Convert user-friendly range (200-1000) to actual log-gamma (10.0-0.01).
+        
+        Neutral (500) is now shifted to be slightly darker (0.5 gamma)
+        to satisfy the request for darker prints.
+        1000 is extremely aggressive (approx 0.001 gamma).
+        """
+        val = user_gamma if user_gamma is not None else self.gamma_config
+        # Center shifted to 350 to make 500 have a gamma of ~0.25 (quite dark)
+        # And 1000 have a gamma of ~10^-2.6 (practically black)
+        return float(10 ** ((350 - val) / 250))
 
     def process(self, job: PrintJob, simulate_override: Optional[bool] = None) -> dict:
         payload, preview = self._build_payload(job)
@@ -109,7 +130,8 @@ class PrintProcessor:
                     new_height = int(image.height * ratio)
                     image = image.resize((self.width, new_height), Image.Resampling.LANCZOS)
                 
-                image_payload = image_to_escpos(image, cut=False)
+                gamma = self._get_actual_gamma(job.gamma)
+                image_payload = image_to_escpos(image, cut=False, gamma=gamma)
                 
                 # Process commands
                 commands_payload = self._decode_raw(commands_data)
@@ -120,7 +142,9 @@ class PrintProcessor:
                 raise PrinterError(f"Contenido hybrid inválido (debe ser JSON): {exc}") from exc
         else:
             raise PrinterError(f"Modo no soportado: {job.mode}")
-        return image_to_escpos(image), preview
+        
+        gamma = self._get_actual_gamma(job.gamma)
+        return image_to_escpos(image, gamma=gamma), preview
 
     @staticmethod
     def _decode_raw(content: str) -> bytes:
