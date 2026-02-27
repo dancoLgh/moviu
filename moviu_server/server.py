@@ -43,12 +43,31 @@ class PrintRequest(BaseModel):
         le=600,
         description="DPI para renderizado de PDF en impresora local (72-600). Mayor = mejor calidad."
     )
+    paper_size: Optional[str] = Field(
+        None,
+        description="Tamaño de hoja para PDF local (A4, Letter, Legal, A5, etc. o código DMPAPER numérico)"
+    )
+    paper_width_mm: Optional[float] = Field(
+        None,
+        gt=0,
+        le=2000,
+        description="Ancho de hoja personalizado en mm para PDF local (requiere paper_height_mm)",
+    )
+    paper_height_mm: Optional[float] = Field(
+        None,
+        gt=0,
+        le=2000,
+        description="Alto de hoja personalizado en mm para PDF local (requiere paper_width_mm)",
+    )
     raw_mode: bool = Field(
         False,
         description="Para PDF en impresora local: enviar PDF directamente sin renderizar (requiere soporte PDF nativo)"
     )
     simulate: Optional[bool] = Field(
         None, description="Forzar simulación/impresora virtual (solo desarrollo)"
+    )
+    gamma: Optional[int] = Field(
+        None, description="Ajuste de oscuridad 200 (claro) a 1000 (muy oscuro). Default: 500"
     )
 
 
@@ -59,6 +78,9 @@ class PrintResponse(BaseModel):
     bytes: Optional[int] = None
     printer: Optional[str] = Field(None, description="Nombre de impresora local (para pdf_system)")
     pages: Optional[int] = Field(None, description="Páginas impresas (para pdf_system)")
+    paper_size: Optional[str] = Field(None, description="Tamaño de hoja aplicado (para pdf_system)")
+    paper_width_mm: Optional[float] = Field(None, description="Ancho de hoja aplicado en mm (para pdf_system)")
+    paper_height_mm: Optional[float] = Field(None, description="Alto de hoja aplicado en mm (para pdf_system)")
     message: Optional[str] = Field(None, description="Mensaje descriptivo")
     preview: Optional[dict] = Field(None, description="Vista previa del trabajo si aplica")
 
@@ -69,6 +91,7 @@ def create_api(config: AppConfig) -> FastAPI:
         config.printer_host,
         config.printer_port,
         width=config.printer_width,
+        gamma=config.printer_gamma,
         simulate=config.simulate_printer,
     )
 
@@ -128,7 +151,14 @@ def create_api(config: AppConfig) -> FastAPI:
                     if request.raw_mode:
                         result = print_pdf_raw_to_printer(pdf_data, printer_name)
                     else:
-                        result = print_pdf_to_system_printer(pdf_data, printer_name, dpi=request.dpi)
+                        result = print_pdf_to_system_printer(
+                            pdf_data,
+                            printer_name,
+                            dpi=request.dpi,
+                            paper_size=request.paper_size,
+                            paper_width_mm=request.paper_width_mm,
+                            paper_height_mm=request.paper_height_mm,
+                        )
                 except SystemPrinterError as exc:
                     LOGGER.exception("System print job failed")
                     raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -151,7 +181,13 @@ def create_api(config: AppConfig) -> FastAPI:
                             host=target_host,
                             port=target_port,
                             bytes=len(pdf_data),
+                            printer=None,
+                            pages=None,
+                            paper_size=None,
+                            paper_width_mm=None,
+                            paper_height_mm=None,
                             message=f"PDF enviado directamente a {target_host}:{target_port}",
+                            preview=None,
                         )
                     except Exception as exc:
                         LOGGER.exception("Failed to send PDF to network printer")
@@ -181,6 +217,7 @@ def create_api(config: AppConfig) -> FastAPI:
             printer_host=printer_host or config.printer_host,
             printer_port=printer_port or config.printer_port,
             code_page=request.code_page,
+            gamma=request.gamma,
         )
         try:
             result = processor.process(job, simulate_override=simulate)

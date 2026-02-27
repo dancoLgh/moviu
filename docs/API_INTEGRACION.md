@@ -39,6 +39,9 @@
 | `printer` | PrinterSettings | Destino de impresión (opcional) |
 | `code_page` | string | Para `raw_text`: cp437, cp850, cp858, cp1252, etc. |
 | `dpi` | int | Para `pdf` con `printer.name`: resolución 72-600 (default: 150) |
+| `paper_size` | string | Para `pdf` con `printer.name` y `raw_mode=false`: A4, Letter, Legal, etc. o código DMPAPER |
+| `paper_width_mm` | float | Para `pdf` con `printer.name` y `raw_mode=false`: ancho personalizado en mm (requiere `paper_height_mm`) |
+| `paper_height_mm` | float | Para `pdf` con `printer.name` y `raw_mode=false`: alto personalizado en mm (requiere `paper_width_mm`) |
 | `raw_mode` | bool | Para `pdf` con `printer.name`: enviar PDF directo sin renderizar |
 | `simulate` | bool | Forzar simulación (no enviar a impresora física) |
 
@@ -52,6 +55,9 @@
 | `bytes` | int | Tamaño del payload |
 | `printer` | string | Nombre de impresora (pdf_system) |
 | `pages` | int | Páginas impresas (pdf_system) |
+| `paper_size` | string | Tamaño de hoja aplicado (pdf_system renderizado) |
+| `paper_width_mm` | float | Ancho personalizado aplicado en mm (pdf_system renderizado) |
+| `paper_height_mm` | float | Alto personalizado aplicado en mm (pdf_system renderizado) |
 | `message` | string | Mensaje descriptivo |
 | `preview` | object | Datos de previsualización (si simulado) |
 
@@ -175,7 +181,20 @@ El modo `pdf` detecta automáticamente el destino y el tipo de envío:
   "mode": "pdf",
   "content": "JVBERi0xLjQN...",
   "printer": {"name": "HP LaserJet Pro"},
-  "dpi": 300
+  "dpi": 300,
+  "paper_size": "A4"
+}
+```
+
+**Impresora local con tamaño personalizado (mm):**
+```json
+{
+  "mode": "pdf",
+  "content": "JVBERi0xLjQN...",
+  "printer": {"name": "HP LaserJet Pro"},
+  "dpi": 300,
+  "paper_width_mm": 80,
+  "paper_height_mm": 200
 }
 ```
 
@@ -199,6 +218,11 @@ El modo `pdf` detecta automáticamente el destino y el tipo de envío:
 | Opción | Descripción |
 |--------|-------------|
 | `dpi` | Resolución para renderizado: 72-600 (default: 150). Solo aplica cuando `raw_mode=false` |
+| `paper_size` | Tamaño de hoja para renderizado local (`A4`, `A5`, `Letter`, `Legal`, `Tabloid`, `Executive`, `B5`, `carta`, `oficio` o código `DMPAPER`) |
+| `paper_width_mm` | Ancho personalizado en mm para renderizado local |
+| `paper_height_mm` | Alto personalizado en mm para renderizado local |
+
+> Nota: usa `paper_size` o `paper_width_mm`+`paper_height_mm`, pero no ambos a la vez.
 
 ### `raw` — Bytes directos
 
@@ -256,7 +280,7 @@ curl -k -X POST "https://127.0.0.1:9050/api/print" \
 curl -k -X POST "https://127.0.0.1:9050/api/print" \
   -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"mode":"pdf_system","content":"JVBERi0x...","printer":{"name":"HP LaserJet Pro"},"dpi":300}'
+  -d '{"mode":"pdf_system","content":"JVBERi0x...","printer":{"name":"HP LaserJet Pro"},"dpi":300,"paper_width_mm":80,"paper_height_mm":200}'
 ```
 
 ### Python - requests
@@ -281,7 +305,9 @@ payload = {
     "mode": "pdf_system",
     "content": pdf_b64,
     "printer": {"name": "HP LaserJet Pro"},
-    "dpi": 300
+    "dpi": 300,
+    "paper_width_mm": 80,
+    "paper_height_mm": 200
 }
 res = requests.post(url, headers={"X-API-Key": api_key}, json=payload, verify=False)
 print(res.json())
@@ -317,7 +343,9 @@ fetch(url, {
     mode: 'pdf_system',
     content: pdfBase64,
     printer: { name: 'HP LaserJet Pro' },
-    dpi: 300
+    dpi: 300,
+    paper_width_mm: 80,
+    paper_height_mm: 200
   })
 }).then(r => r.json()).then(console.log);
 ```

@@ -143,7 +143,20 @@ El modo `pdf` detecta automáticamente el destino y el tipo de envío según los
   "mode": "pdf",
   "content": "JVBERi0xLjQN...",
   "printer": {"name": "HP LaserJet Pro"},
-  "dpi": 300
+  "dpi": 300,
+  "paper_size": "A4"
+}
+```
+
+**Impresora local con tamaño personalizado (mm):**
+```json
+{
+  "mode": "pdf",
+  "content": "JVBERi0xLjQN...",
+  "printer": {"name": "HP LaserJet Pro"},
+  "dpi": 300,
+  "paper_width_mm": 80,
+  "paper_height_mm": 200
 }
 ```
 
@@ -163,6 +176,10 @@ El modo `pdf` detecta automáticamente el destino y el tipo de envío según los
 | `printer.name` | `true` | Envía PDF directo al spooler |
 | `printer.host/port` | `false` | Renderiza a ESC/POS (térmicas) |
 | `printer.host/port` | `true` | Envía PDF directo por TCP |
+
+`paper_size` es opcional y aplica cuando imprimes PDF con `printer.name` y `raw_mode: false`. Puedes enviar alias como `A4`, `A5`, `Letter`, `Legal`, `Tabloid`, `Executive`, `B5` (también `carta`/`oficio`) o un código numérico `DMPAPER` de Windows.
+
+Si necesitas tamaño personalizado, usa `paper_width_mm` + `paper_height_mm` (ambos obligatorios juntos). No se puede combinar `paper_size` con `paper_width_mm`/`paper_height_mm` en la misma petición.
 
 ### Imprimir etiquetas ZPL (Zebra)
 
