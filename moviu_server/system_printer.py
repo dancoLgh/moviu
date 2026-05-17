@@ -359,3 +359,56 @@ def print_pdf_raw_to_printer(
     finally:
         win32print.ClosePrinter(handle)
 
+
+def print_raw_to_system_printer(
+    payload: bytes,
+    printer_name: str,
+    document_name: str = "Moviu RAW Print",
+) -> dict:
+    """Send raw bytes directly to a local system printer spooler."""
+    if not payload:
+        raise SystemPrinterError("El payload RAW está vacío")
+
+    if win32print is None:
+        out_dir = Path.home() / ".moviu_printer" / "simulated_jobs"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        job_path = out_dir / "raw_print_job.bin"
+        job_path.write_bytes(payload)
+        logger.info("Sistema no Windows: RAW guardado en %s", job_path)
+        return {
+            "status": "simulated",
+            "message": f"RAW guardado en {job_path}",
+            "printer": "none",
+            "bytes": len(payload),
+        }
+
+    assert win32print is not None
+
+    handle = win32print.OpenPrinter(printer_name)
+    try:
+        win32print.StartDocPrinter(handle, 1, (document_name, "", "RAW"))
+        try:
+            win32print.StartPagePrinter(handle)
+            total_written = 0
+            view = memoryview(payload)
+            while total_written < len(payload):
+                written = int(win32print.WritePrinter(handle, bytes(view[total_written: total_written + 65536])))
+                if written <= 0:
+                    raise SystemPrinterError(
+                        f"WritePrinter devolvió {written} en offset {total_written}/{len(payload)}"
+                    )
+                total_written += written
+            win32print.EndPagePrinter(handle)
+        finally:
+            win32print.EndDocPrinter(handle)
+
+        logger.info("RAW enviado a %s (%d bytes)", printer_name, len(payload))
+        return {
+            "status": "sent",
+            "message": f"RAW enviado directamente a {printer_name}",
+            "printer": printer_name,
+            "bytes": len(payload),
+        }
+    finally:
+        win32print.ClosePrinter(handle)
+

@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import platform
 import socket
@@ -7,19 +8,20 @@ from typing import Callable, List
 
 
 if platform.system() == "Windows":
-    import win32print  # type: ignore
     import win32api  # type: ignore
+    import win32print  # type: ignore
 else:
     win32print = None  # type: ignore
     win32api = None  # type: ignore
 
 logger = logging.getLogger(__name__)
+_WRITE_LOCK = threading.Lock()
 
 
 def list_printers() -> List[str]:
     """Return installed printer names (Windows only)."""
     if win32print is None:
-        logger.warning("Listar impresoras solo está disponible en Windows.")
+        logger.warning("Listar impresoras solo esta disponible en Windows.")
         return []
 
     flags = win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS
@@ -27,10 +29,30 @@ def list_printers() -> List[str]:
     return [printer[2] for printer in printers]
 
 
+def _write_printer_all(handle: object, payload: bytes) -> int:
+    """Write a payload to the spooler, handling partial writes."""
+    assert win32print is not None
+
+    total_written = 0
+    view = memoryview(payload)
+    payload_size = len(payload)
+
+    while total_written < payload_size:
+        chunk = bytes(view[total_written : total_written + 65536])
+        written = int(win32print.WritePrinter(handle, chunk))
+        if written <= 0:
+            raise RuntimeError(
+                f"WritePrinter returned {written} at offset {total_written}/{payload_size}"
+            )
+        total_written += written
+
+    return total_written
+
+
 def send_raw_to_printer(printer_name: str, payload: bytes) -> None:
     """Send raw bytes to a printer (Windows) or store them locally on other OS."""
     if not payload:
-        logger.info("Se recibió una conexión vacía; no se envió nada a la impresora.")
+        logger.info("Se recibio una conexion vacia; no se envio nada a la impresora.")
         return
 
     if win32print is None:
@@ -38,21 +60,33 @@ def send_raw_to_printer(printer_name: str, payload: bytes) -> None:
         out_dir.mkdir(parents=True, exist_ok=True)
         job_path = out_dir / "job.bin"
         job_path.write_bytes(payload)
-        logger.info("Sistema no Windows: se guardó el trabajo simulado en %s", job_path)
+        logger.info("Sistema no Windows: se guardo el trabajo simulado en %s", job_path)
         return
 
-    handle = win32print.OpenPrinter(printer_name)
-    try:
-        win32print.StartDocPrinter(handle, 1, ("TCP USB Bridge", None, "RAW"))
+    payload_size = len(payload)
+    payload_hash = hashlib.sha256(payload).hexdigest()[:16]
+
+    # Serialize writes to avoid interleaving jobs in the same spooler.
+    with _WRITE_LOCK:
+        handle = win32print.OpenPrinter(printer_name)
         try:
-            win32print.StartPagePrinter(handle)
-            win32print.WritePrinter(handle, payload)
-            win32print.EndPagePrinter(handle)
+            win32print.StartDocPrinter(handle, 1, ("TCP USB Bridge", None, "RAW"))
+            try:
+                win32print.StartPagePrinter(handle)
+                written = _write_printer_all(handle, payload)
+                win32print.EndPagePrinter(handle)
+            finally:
+                win32print.EndDocPrinter(handle)
         finally:
-            win32print.EndDocPrinter(handle)
-        logger.info("Trabajo enviado a %s (%d bytes)", printer_name, len(payload))
-    finally:
-        win32print.ClosePrinter(handle)
+            win32print.ClosePrinter(handle)
+
+    logger.info(
+        "Job sent to %s (%d bytes, written=%d, sha256=%s)",
+        printer_name,
+        payload_size,
+        written,
+        payload_hash,
+    )
 
 
 class PrinterServer:
@@ -104,8 +138,9 @@ class PrinterServer:
 
     def _handle_client(self, client: socket.socket, address: tuple[str, int]) -> None:
         with client:
-            logger.info("Conexión entrante de %s:%d", address[0], address[1])
+            logger.info("Conexion entrante de %s:%d", address[0], address[1])
             buffer = bytearray()
+            had_error = False
             try:
                 while True:
                     chunk = client.recv(4096)
@@ -113,18 +148,29 @@ class PrinterServer:
                         break
                     buffer.extend(chunk)
             except ConnectionResetError:
-                logger.info(
-                    "El cliente %s:%d interrumpió la conexión de forma abrupta (reset)",
+                had_error = True
+                logger.warning(
+                    "El cliente %s:%d interrumpio la conexion de forma abrupta despues de %d bytes",
                     address[0],
                     address[1],
+                    len(buffer),
                 )
             except OSError:
+                had_error = True
                 logger.exception("Error recibiendo datos de %s:%d", address[0], address[1])
+
+            if buffer and not had_error:
+                send_raw_to_printer(self.printer_name, bytes(buffer))
+            elif buffer and had_error:
+                logger.warning(
+                    "Se descarto un payload incompleto de %s:%d (%d bytes)",
+                    address[0],
+                    address[1],
+                    len(buffer),
+                )
             else:
-                if buffer:
-                    send_raw_to_printer(self.printer_name, bytes(buffer))
-                else:
-                    logger.info("La conexión de %s:%d no envió datos", address[0], address[1])
+                logger.info("La conexion de %s:%d no envio datos", address[0], address[1])
 
         if self.status_callback:
-            self.status_callback(f"Último cliente: {address[0]}:{address[1]}")
+            self.status_callback(f"Ultimo cliente: {address[0]}:{address[1]}")
+

@@ -5,7 +5,7 @@ Servidor de impresión local para convertir HTML → imagen → ESC/POS y expone
 ## Características
 
 - Aplicación de escritorio (Tkinter) que inicia/detiene el servidor con visor de logs.
-- API REST (`FastAPI`) accesible mediante `X-API-Key` y servido sobre HTTPS con certificados autogenerados.
+- API REST (`FastAPI`) accesible mediante `X-API-Key` y servido sobre HTTPS con certificado de servidor firmado por una CA local autogenerada.
 - **Modos soportados:**
   - `html` / `image` — Impresoras térmicas (ESC/POS)
   - `pdf` — Modo unificado: impresoras térmicas (red) o del sistema (local)
@@ -32,7 +32,7 @@ pip install -r requirements.txt
    python main.py
    ```
 2. Configura host, puerto, datos de la impresora y guarda.
-3. Opcional: genera/descarga el certificado SSL desde los botones "Generar certificados" y "Exportar certificado".
+3. Opcional: genera/descarga el certificado CA desde los botones "Generar certificados" y "Exportar Certificado CA" para instalarlo en tablets o clientes que consumen la API por HTTPS.
 4. Si quieres evitar envíos reales durante el desarrollo, activa "Simular impresora (solo desarrollo)" para que los trabajos se guarden en `~/.moviu_printer/simulated_jobs/` con una copia binaria (`.bin`) y, cuando aplique, una vista previa en texto (`.txt`/`.hex`) o imagen (`.png`). El log indica la ruta de cada trabajo simulado y el botón "Abrir simulaciones" abre la carpeta. La respuesta de la API también incluirá un bloque `preview` con texto/HTML/hex y la imagen en base64 cuando la simulación esté activa.
 5. Inicia el servidor desde la propia interfaz. La API key se muestra en la ventana y el log en la parte inferior.
 
@@ -264,7 +264,8 @@ Usa el modo `zpl` para impresoras de etiquetas:
 
 - La API solo responde cuando la cabecera `X-API-Key` coincide con la clave almacenada localmente.
 - Puedes regenerar la clave desde la interfaz; se guardará en `~/.moviu_printer/config.json`.
-- El servidor levanta HTTPS con certificados autogenerados en `~/.moviu_printer/cert.pem` y `~/.moviu_printer/key.pem`. Usa "Exportar certificado" para copiar el público y confiarlo en las otras PCs que consuman la API en red local.
+- El servidor levanta HTTPS con `~/.moviu_printer/cert.pem` y `~/.moviu_printer/key.pem`, firmados por una CA local en `~/.moviu_printer/ca_cert.pem` (clave: `~/.moviu_printer/ca_key.pem`).
+- Usa "Exportar Certificado CA" para instalar `ca_cert.pem` en tablets/PCs clientes y evitar avisos de certificado.
 
 ## Licencia
 

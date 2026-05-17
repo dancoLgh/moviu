@@ -3,20 +3,25 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import json
 import logging
 import re
 import socket
+import threading
+import time
 from datetime import datetime
 from dataclasses import dataclass
 from typing import Literal, Optional
+from uuid import uuid4
 
 from PIL import Image
 
 from .config import CONFIG_DIR
 from .escpos import image_to_escpos
 from .html_renderer import html_to_image
+from .system_printer import SystemPrinterError, print_raw_to_system_printer
 
 
 @dataclass
@@ -25,6 +30,7 @@ class PrintJob:
     content: str
     printer_host: str
     printer_port: int
+    printer_name: Optional[str] = None
     auto_cut: bool = True
     code_page: Optional[str] = None
     gamma: Optional[int] = None
@@ -32,6 +38,20 @@ class PrintJob:
 
 class PrinterError(RuntimeError):
     """Domain-specific errors for job processing."""
+
+
+_SEND_LOCKS: dict[tuple[str, int], threading.Lock] = {}
+_SEND_LOCKS_GUARD = threading.Lock()
+
+
+def _get_send_lock(host: str, port: int) -> threading.Lock:
+    key = (host, port)
+    with _SEND_LOCKS_GUARD:
+        lock = _SEND_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _SEND_LOCKS[key] = lock
+        return lock
 
 
 class PrintProcessor:
@@ -68,19 +88,65 @@ class PrintProcessor:
         simulate = self.simulate if simulate_override is None else simulate_override
         preview_data: dict | None = None
 
-        if simulate:
-            preview_data = self._simulate_output(job, payload, preview)
-            status = "simulated"
+        payload_size = len(payload)
+        payload_hash = hashlib.sha256(payload).hexdigest()[:16]
+        job_id = datetime.now().strftime("%Y%m%d-%H%M%S-%f") + "-" + uuid4().hex[:8]
+        target_printer = job.printer_name
+        target_host = job.printer_host or self.default_host
+        target_port = job.printer_port or self.default_port
+
+        if target_printer:
+            logging.info(
+                "Job %s prepared (mode=%s printer=%s bytes=%d sha256=%s)",
+                job_id,
+                job.mode,
+                target_printer,
+                payload_size,
+                payload_hash,
+            )
         else:
-            self._send_to_printer(payload, job.printer_host, job.printer_port)
-            status = "sent"
+            logging.info(
+                "Job %s prepared (mode=%s host=%s port=%s bytes=%d sha256=%s)",
+                job_id,
+                job.mode,
+                target_host,
+                target_port,
+                payload_size,
+                payload_hash,
+            )
+
+        if simulate:
+            preview_data = self._simulate_output(job, payload, preview, job_id, payload_hash)
+            status = "simulated"
+            local_result: dict[str, object] | None = None
+        else:
+            local_result = None
+            if target_printer:
+                try:
+                    local_result = print_raw_to_system_printer(
+                        payload,
+                        target_printer,
+                        document_name=f"Moviu {job.mode.upper()} Print",
+                    )
+                except SystemPrinterError as exc:
+                    raise PrinterError(str(exc)) from exc
+                status = str(local_result.get("status", "sent"))
+            else:
+                self._send_to_printer(payload, target_host, target_port, job_id=job_id)
+                status = "sent"
 
         response = {
             "status": status,
-            "host": job.printer_host,
-            "port": job.printer_port,
-            "bytes": len(payload),
+            "job_id": job_id,
+            "bytes": payload_size,
         }
+        if target_printer:
+            response["printer"] = target_printer
+            if local_result and "message" in local_result:
+                response["message"] = local_result["message"]
+        else:
+            response["host"] = target_host
+            response["port"] = target_port
         if preview_data:
             response["preview"] = preview_data
         return response
@@ -96,8 +162,8 @@ class PrintProcessor:
             preview = {"hex": payload.hex()}
             return payload, preview
         if job.mode == "zpl":
-            payload = job.content.encode("utf-8")
-            preview = {"zpl": job.content}
+            payload, zpl_preview = self._decode_zpl(job.content, job.code_page)
+            preview = {"zpl": zpl_preview, "encoding": (job.code_page or "latin-1").lower()}
             return payload, preview
         if job.mode == "image":
             image = self._decode_image(job.content)
@@ -150,13 +216,13 @@ class PrintProcessor:
     def _decode_raw(content: str) -> bytes:
         """Decode transport-friendly strings (hex/base64) into bytes."""
 
-        data = content.strip()
+        data = re.sub(r"\s+", "", content.strip())
         try:
             return bytes.fromhex(data)
         except ValueError:
             pass
         try:
-            return base64.b64decode(data)
+            return base64.b64decode(data, validate=True)
         except Exception as exc:  # noqa: BLE001
             raise PrinterError(
                 "El contenido raw debe ser una cadena hexadecimal o base64"
@@ -190,6 +256,45 @@ class PrintProcessor:
             raise PrinterError(f"Code page no soportada: {encoding}") from exc
         except Exception as exc:  # noqa: BLE001
             raise PrinterError("No se pudo decodificar raw_text") from exc
+
+    @staticmethod
+    def _decode_zpl(content: str, code_page: Optional[str] = None) -> tuple[bytes, str]:
+        r"""Decode ZPL text preserving Zebra-friendly single-byte encodings."""
+
+        encoding = (code_page or "latin-1").lower()
+        try:
+            text = content.strip()
+
+            if "^XA" not in text and "^XZ" not in text:
+                compact = re.sub(r"\s+", "", text)
+                try:
+                    decoded = base64.b64decode(compact, validate=True)
+                    text = decoded.decode(encoding)
+                except Exception:
+                    text = content.strip()
+
+            text = text.replace("\\n", "\n").replace("\\r", "\r")
+
+            def _hex_repl(match: re.Match) -> str:
+                value = int(match.group(1), 16)
+                return chr(value)
+
+            text = re.sub(r"\\x([0-9A-Fa-f]{2})", _hex_repl, text)
+
+            if "^XA" not in text and "~JA" not in text and "^XZ" not in text:
+                raise PrinterError("El contenido ZPL no parece válido: falta ^XA/^XZ")
+
+            if "^XZ" in text and not text.endswith(("\n", "\r")):
+                text += "\n"
+
+            payload = text.encode(encoding, errors="strict")
+            return payload, text
+        except LookupError as exc:
+            raise PrinterError(f"Code page no soportada para zpl: {encoding}") from exc
+        except UnicodeEncodeError as exc:
+            raise PrinterError(
+                f"El ZPL contiene caracteres no soportados por la codificación {encoding}"
+            ) from exc
 
     @staticmethod
     def _code_page_command(encoding: str) -> bytes:
@@ -230,14 +335,14 @@ class PrintProcessor:
         try:
             if data.startswith("data:image"):
                 _, b64_data = data.split(",", 1)
-                raw = base64.b64decode(b64_data)
+                raw = base64.b64decode(re.sub(r"\s+", "", b64_data), validate=True)
             else:
-                stripped = data.strip()
+                stripped = re.sub(r"\s+", "", data.strip())
                 try:
                     # Try hex first as it's more specific
                     raw = bytes.fromhex(stripped)
                 except ValueError:
-                    raw = base64.b64decode(stripped)
+                    raw = base64.b64decode(stripped, validate=True)
         except Exception as exc:  # noqa: BLE001
             raise PrinterError("La imagen debe estar codificada en base64 o hexadecimal") from exc
         return Image.open(io.BytesIO(raw))
@@ -258,9 +363,9 @@ class PrintProcessor:
         try:
             if data.startswith("data:application/pdf"):
                 _, b64_data = data.split(",", 1)
-                raw = base64.b64decode(b64_data)
+                raw = base64.b64decode(re.sub(r"\s+", "", b64_data), validate=True)
             else:
-                raw = base64.b64decode(data)
+                raw = base64.b64decode(re.sub(r"\s+", "", data), validate=True)
         except Exception as exc:  # noqa: BLE001
             raise PrinterError("El PDF debe estar codificado en base64") from exc
 
@@ -304,38 +409,87 @@ class PrintProcessor:
         return combined
 
     @staticmethod
-    def _send_to_printer(payload: bytes, host: Optional[str], port: Optional[int]) -> None:
+    def _send_to_printer(
+        payload: bytes,
+        host: Optional[str],
+        port: Optional[int],
+        *,
+        job_id: Optional[str] = None,
+    ) -> None:
         target_host = host or "127.0.0.1"
         target_port = port or 9100
+        payload_size = len(payload)
+        send_lock = _get_send_lock(target_host, target_port)
+
         try:
-            with socket.create_connection((target_host, target_port), timeout=10) as sock:
-                sock.sendall(payload)
+            with send_lock:
+                with socket.create_connection((target_host, target_port), timeout=10) as sock:
+                    total_sent = 0
+                    view = memoryview(payload)
+
+                    # Use smaller chunks to improve compatibility with low-buffer printers.
+                    chunk_size = 4096
+                    while total_sent < payload_size:
+                        sent = sock.send(view[total_sent : total_sent + chunk_size])
+                        if sent <= 0:
+                            raise PrinterError(
+                                f"Socket send devolvio {sent} en offset {total_sent}/{payload_size}"
+                            )
+                        total_sent += sent
+
+                        # Tiny pacing to avoid overrun on some ESC/POS network adapters.
+                        if total_sent < payload_size:
+                            time.sleep(0.002)
         except OSError as exc:
             raise PrinterError(
                 f"No se pudo enviar el trabajo a {target_host}:{target_port}: {exc}"
             ) from exc
 
-    def _simulate_output(self, job: PrintJob, payload: bytes, preview: dict) -> dict:
+        logging.info(
+            "Job %s sent to %s:%s (%d bytes)",
+            job_id or "-",
+            target_host,
+            target_port,
+            payload_size,
+        )
+
+    def _simulate_output(
+        self,
+        job: PrintJob,
+        payload: bytes,
+        preview: dict,
+        job_id: str,
+        payload_hash: str,
+    ) -> dict:
         jobs_dir = CONFIG_DIR / "simulated_jobs"
         jobs_dir.mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        base = jobs_dir / f"job-{timestamp}"
+        safe_job_id = job_id.replace(":", "-")
+        base = jobs_dir / f"job-{safe_job_id}"
 
         payload_path = base.with_suffix(".bin")
         payload_path.write_bytes(payload)
 
         summary_lines = [
+            f"Job: {job_id}",
             f"Modo: {job.mode}",
-            f"Host: {job.printer_host or self.default_host}",
-            f"Puerto: {job.printer_port or self.default_port}",
             f"Bytes: {len(payload)}",
+            f"sha256: {payload_hash}",
         ]
 
         inline_preview: dict = {
-            "host": job.printer_host or self.default_host,
-            "port": job.printer_port or self.default_port,
+            "job_id": job_id,
+            "payload_sha256": payload_hash,
             "payload_path": str(payload_path),
         }
+
+        if job.printer_name:
+            summary_lines.append(f"Impresora: {job.printer_name}")
+            inline_preview["printer"] = job.printer_name
+        else:
+            summary_lines.append(f"Host: {job.printer_host or self.default_host}")
+            summary_lines.append(f"Puerto: {job.printer_port or self.default_port}")
+            inline_preview["host"] = job.printer_host or self.default_host
+            inline_preview["port"] = job.printer_port or self.default_port
 
         if "text" in preview:
             text_path = base.with_suffix(".txt")
@@ -356,7 +510,7 @@ class PrintProcessor:
             image_path = base.with_suffix(".png")
             try:
                 preview["image"].save(image_path)
-                summary_lines.append(f"Previsualización: {image_path}")
+                summary_lines.append(f"Previsualizacion: {image_path}")
                 buffer = io.BytesIO()
                 preview["image"].save(buffer, format="PNG")
                 inline_preview["image_base64"] = base64.b64encode(buffer.getvalue()).decode(
@@ -364,6 +518,7 @@ class PrintProcessor:
                 )
             except Exception as exc:  # noqa: BLE001
                 logging.warning("No se pudo guardar la vista previa de imagen: %s", exc)
+
         summary = " | ".join(summary_lines)
         logging.info("Trabajo simulado guardado en %s (%s)", payload_path, summary)
         return inline_preview

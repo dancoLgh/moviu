@@ -73,17 +73,17 @@ class PrintRequest(BaseModel):
 
 class PrintResponse(BaseModel):
     status: str
+    job_id: Optional[str] = Field(None, description="Identificador del trabajo para trazabilidad")
     host: Optional[str] = None
     port: Optional[int] = None
     bytes: Optional[int] = None
     printer: Optional[str] = Field(None, description="Nombre de impresora local (para pdf_system)")
-    pages: Optional[int] = Field(None, description="Páginas impresas (para pdf_system)")
-    paper_size: Optional[str] = Field(None, description="Tamaño de hoja aplicado (para pdf_system)")
+    pages: Optional[int] = Field(None, description="Paginas impresas (para pdf_system)")
+    paper_size: Optional[str] = Field(None, description="Tamano de hoja aplicado (para pdf_system)")
     paper_width_mm: Optional[float] = Field(None, description="Ancho de hoja aplicado en mm (para pdf_system)")
     paper_height_mm: Optional[float] = Field(None, description="Alto de hoja aplicado en mm (para pdf_system)")
     message: Optional[str] = Field(None, description="Mensaje descriptivo")
     preview: Optional[dict] = Field(None, description="Vista previa del trabajo si aplica")
-
 
 
 def create_api(config: AppConfig) -> FastAPI:
@@ -125,12 +125,18 @@ def create_api(config: AppConfig) -> FastAPI:
         request: PrintRequest,
         _: None = Depends(require_api_key),
     ) -> PrintResponse:
+        printer_name = request.printer.name if request.printer else None
+        printer_host = request.printer.host if request.printer else None
+        printer_port = request.printer.port if request.printer else None
+        has_explicit_network_target = bool(request.printer and (printer_host or printer_port))
+        default_local_printer = (
+            config.usb_bridge_printer
+            if config.usb_bridge_enabled and config.usb_bridge_printer
+            else None
+        )
+
         # Handle PDF mode with intelligent routing
         if request.mode == "pdf":
-            printer_name = request.printer.name if request.printer else None
-            printer_host = request.printer.host if request.printer else None
-            printer_port = request.printer.port if request.printer else None
-
             # Decode PDF content once
             try:
                 content = request.content
@@ -165,7 +171,7 @@ def create_api(config: AppConfig) -> FastAPI:
                 return PrintResponse(**result)
 
             # Route 2: Print to network printer by host/port
-            if printer_host or config.printer_host:
+            if has_explicit_network_target or (not default_local_printer and config.printer_host):
                 target_host = printer_host or config.printer_host
                 target_port = printer_port or config.printer_port or 9100
 
@@ -198,8 +204,12 @@ def create_api(config: AppConfig) -> FastAPI:
                     pass
 
         # Handle other modes (thermal printers via TCP)
-        printer_host = request.printer.host if request.printer else config.printer_host
-        printer_port = request.printer.port if request.printer else config.printer_port
+        resolved_local_printer = printer_name
+        if resolved_local_printer is None and not has_explicit_network_target:
+            resolved_local_printer = default_local_printer
+
+        resolved_printer_host = None if resolved_local_printer else (printer_host or config.printer_host)
+        resolved_printer_port = None if resolved_local_printer else (printer_port or config.printer_port)
         simulate = (
             request.simulate
             if request.simulate is not None
@@ -214,8 +224,9 @@ def create_api(config: AppConfig) -> FastAPI:
         job = PrintJob(
             mode=request.mode, # type: ignore
             content=content,
-            printer_host=printer_host or config.printer_host,
-            printer_port=printer_port or config.printer_port,
+            printer_host=resolved_printer_host or "",
+            printer_port=resolved_printer_port or 0,
+            printer_name=resolved_local_printer,
             code_page=request.code_page,
             gamma=request.gamma,
         )
@@ -252,4 +263,3 @@ def create_api(config: AppConfig) -> FastAPI:
         return {"servers": servers, "count": len(servers)}
 
     return app
-

@@ -10,7 +10,8 @@
 ## Requisitos
 
 - La aplicación corre localmente (por defecto en `https://127.0.0.1:9050`).
-- Certificados auto-firmados se generan automáticamente; en entornos de desarrollo puedes usar `-k` en `curl` o `verify=False` en `requests`.
+- El servidor genera una CA local (`ca_cert.pem`) y firma con ella el certificado HTTPS del servidor; instala esa CA en tablets/clientes para confiar en la conexión.
+- En entornos de desarrollo puedes usar `-k` en `curl` o `verify=False` en `requests` si aún no instalas la CA.
 - La API Key se persiste en el archivo de configuración (`~/.moviu_printer/config.json`).
 
 ## Autenticación

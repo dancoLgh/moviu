@@ -21,7 +21,13 @@ from PIL import Image, ImageDraw, ImageFont
 import uvicorn
 
 from .autostart import configure_autostart
-from .certs import certificates_folder, ensure_certificates, export_certificate, install_certificate_in_system
+from .certs import (
+    ca_certificate_path,
+    certificates_folder,
+    ensure_certificates,
+    export_ca_certificate,
+    install_certificate_in_system,
+)
 from .config import AppConfig, CONFIG_DIR, load_config, save_config, VERSION
 from .server import create_api
 from .usb_bridge import UsbBridgeController, discover_printers
@@ -368,7 +374,7 @@ class DesktopApp:
         for text, cmd in [
             ("Generar Certificados SSL", self.generate_certs),
             ("Instalar Certificado en Windows (esta PC)", self.install_cert_locally),
-            ("Exportar Certificado (.crt)", self.export_cert),
+            ("Exportar Certificado CA (.crt)", self.export_cert),
             ("Abrir Carpeta de Simulaciones", self.open_simulations),
         ]:
             ttk.Button(tools_frame, text=text, command=cmd).pack(fill=tk.X, pady=2)
@@ -620,11 +626,14 @@ class DesktopApp:
             cert_hosts,
             force=True
         )
+        ca_path = ca_certificate_path(Path(self.config.ssl_cert_path))
         messagebox.showinfo(
             "Certificados",
-            f"Certificado generado en:\n{cert_path}\n\nClave privada:\n{key_path}",
+            f"Certificado de servidor generado en:\n{cert_path}\n\n"
+            f"Clave privada del servidor:\n{key_path}\n\n"
+            f"Certificado CA (para instalar en tablets/clientes):\n{ca_path}",
         )
-        logging.info("Certificados SSL generados")
+        logging.info("Certificados SSL regenerados (CA + servidor)")
 
     def export_cert(self) -> None:
         cert_hosts = ["localhost", "127.0.0.1", get_local_ip()]
@@ -637,32 +646,43 @@ class DesktopApp:
         dest = filedialog.asksaveasfilename(
             defaultextension=".crt",
             filetypes=[("Certificado", "*.crt"), ("PEM", "*.pem"), ("Todos", "*.*")],
-            initialfile="moviu_cert.crt",
+            initialfile="moviu_ca.crt",
             initialdir=certificates_folder(),
-            title="Exportar certificado público",
+            title="Exportar certificado CA",
         )
         if dest:
-            export_certificate(Path(dest), cert_path)
-            messagebox.showinfo("Exportar certificado", f"Certificado copiado a\n{dest}")
-            logging.info("Certificado exportado a %s", dest)
+            export_ca_certificate(Path(dest), cert_path)
+            messagebox.showinfo(
+                "Exportar certificado",
+                f"Certificado CA copiado a\n{dest}\n\n"
+                "Instálalo en la tablet/cliente para confiar en HTTPS.",
+            )
+            logging.info("Certificado CA exportado a %s", dest)
 
     def install_cert_locally(self) -> None:
-        cert_path = Path(self.config.ssl_cert_path)
-        if not cert_path.exists():
-            self.generate_certs()
-        
-        if install_certificate_in_system(cert_path):
+        cert_hosts = ["localhost", "127.0.0.1", get_local_ip()]
+        if self.config.host not in ("0.0.0.0", "127.0.0.1", "localhost"):
+            cert_hosts.append(self.config.host)
+
+        cert_path, _ = ensure_certificates(
+            Path(self.config.ssl_cert_path),
+            Path(self.config.ssl_key_path),
+            cert_hosts,
+        )
+        ca_path = ca_certificate_path(cert_path)
+
+        if install_certificate_in_system(ca_path):
             messagebox.showinfo(
                 "Instalar Certificado",
-                "Certificado instalado correctamente en el almacén de confianza de Windows.\n\n"
+                "Certificado CA instalado correctamente en el almacén de confianza de Windows.\n\n"
                 "Ahora los navegadores de esta PC deberían confiar en la conexión HTTPS."
             )
-            logging.info("Certificado SSL instalado en el sistema local")
+            logging.info("Certificado CA instalado en el sistema local")
         else:
             messagebox.showerror(
                 "Error",
-                "No se pudo instalar el certificado automáticamente.\n"
-                "Intenta ejecutar la aplicación como administrador o instala el certificado manualmente usando el botón 'Exportar'."
+                "No se pudo instalar el certificado CA automáticamente.\n"
+                "Intenta ejecutar la aplicación como administrador o exportarlo para instalarlo manualmente."
             )
 
     def open_simulations(self) -> None:
