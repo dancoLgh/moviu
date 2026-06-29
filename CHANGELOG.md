@@ -2,6 +2,13 @@
 
 Todos los cambios notables en este proyecto serán documentados en este archivo.
 
+## [1.0.3] - 2026-06-29
+
+### Corregido
+- El puente TCP -> USB ahora valida que la impresora seleccionada exista antes de iniciar.
+- Si la impresora USB desaparece mientras el puente está activo, el estado y los logs muestran un error explícito.
+- Los errores al enviar RAW a una impresora local ahora se devuelven como errores controlados en vez de `500` genérico.
+
 ## [1.0.2] - 2026-01-25
 
 ### Añadido

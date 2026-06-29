@@ -32,6 +32,12 @@ class UsbBridgeController:
         if self.server:
             return
 
+        printers = discover_printers()
+        if printer_name not in printers:
+            raise ValueError(
+                f"La impresora USB seleccionada no existe o no está disponible: {printer_name}"
+            )
+
         logger.info("Levantando puente TCP → USB en el puerto %d", port)
         self.server = PrinterServer(printer_name, "0.0.0.0", port, self._notify_status)
         self.server.start()
@@ -50,4 +56,3 @@ class UsbBridgeController:
         if self.on_status:
             self.on_status(text)
         logger.info(text)
-

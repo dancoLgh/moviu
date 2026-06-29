@@ -384,8 +384,9 @@ def print_raw_to_system_printer(
 
     assert win32print is not None
 
-    handle = win32print.OpenPrinter(printer_name)
+    handle = None
     try:
+        handle = win32print.OpenPrinter(printer_name)
         win32print.StartDocPrinter(handle, 1, (document_name, "", "RAW"))
         try:
             win32print.StartPagePrinter(handle)
@@ -409,6 +410,11 @@ def print_raw_to_system_printer(
             "printer": printer_name,
             "bytes": len(payload),
         }
+    except SystemPrinterError:
+        raise
+    except Exception as exc:
+        logger.exception("Error enviando RAW a la impresora %s", printer_name)
+        raise SystemPrinterError(f"Error enviando RAW a '{printer_name}': {exc}") from exc
     finally:
-        win32print.ClosePrinter(handle)
-
+        if handle is not None:
+            win32print.ClosePrinter(handle)

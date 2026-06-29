@@ -534,7 +534,7 @@ class DesktopApp:
             self.bridge_controller.start(printer, port)
             self._update_bridge_status(f"Escuchando en 0.0.0.0:{port} → {printer}")
             self.save_settings(notify=False)
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
             messagebox.showerror("Puente", f"No se pudo iniciar el puente: {exc}")
             logging.exception("Error al iniciar el puente TCP → USB")
 

@@ -29,6 +29,13 @@ def list_printers() -> List[str]:
     return [printer[2] for printer in printers]
 
 
+def printer_exists(printer_name: str) -> bool:
+    """Return whether a Windows printer is currently installed/available."""
+    if win32print is None:
+        return True
+    return printer_name in list_printers()
+
+
 def _write_printer_all(handle: object, payload: bytes) -> int:
     """Write a payload to the spooler, handling partial writes."""
     assert win32print is not None
@@ -65,6 +72,11 @@ def send_raw_to_printer(printer_name: str, payload: bytes) -> None:
 
     payload_size = len(payload)
     payload_hash = hashlib.sha256(payload).hexdigest()[:16]
+
+    if not printer_exists(printer_name):
+        raise RuntimeError(
+            f"La impresora seleccionada no existe o no está disponible: {printer_name}"
+        )
 
     # Serialize writes to avoid interleaving jobs in the same spooler.
     with _WRITE_LOCK:
@@ -160,7 +172,13 @@ class PrinterServer:
                 logger.exception("Error recibiendo datos de %s:%d", address[0], address[1])
 
             if buffer and not had_error:
-                send_raw_to_printer(self.printer_name, bytes(buffer))
+                try:
+                    send_raw_to_printer(self.printer_name, bytes(buffer))
+                except Exception as exc:
+                    message = f"Error enviando a impresora USB '{self.printer_name}': {exc}"
+                    logger.exception(message)
+                    if self.status_callback:
+                        self.status_callback(message)
             elif buffer and had_error:
                 logger.warning(
                     "Se descarto un payload incompleto de %s:%d (%d bytes)",
@@ -173,4 +191,3 @@ class PrinterServer:
 
         if self.status_callback:
             self.status_callback(f"Ultimo cliente: {address[0]}:{address[1]}")
-

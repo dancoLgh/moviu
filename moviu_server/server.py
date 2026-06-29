@@ -10,7 +10,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from .config import AppConfig
+from .config import AppConfig, VERSION
 from .printer import PrintJob, PrintProcessor, PrinterError
 from .usb_bridge import discover_printers
 from .system_printer import (
@@ -95,7 +95,7 @@ def create_api(config: AppConfig) -> FastAPI:
         simulate=config.simulate_printer,
     )
 
-    app = FastAPI(title="Moviu Print Server", version="1.0.0")
+    app = FastAPI(title="Moviu Print Server", version=VERSION)
 
     # ------------------------------------------------------------------
     # CORS: permitir cualquier origen (no usamos cookies, solo X-API-Key)
