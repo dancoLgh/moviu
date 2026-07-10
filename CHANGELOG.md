@@ -2,6 +2,11 @@
 
 Todos los cambios notables en este proyecto serán documentados en este archivo.
 
+## [1.0.4] - 2026-07-09
+
+### Corregido
+- Mejora de estabilidad para impresión PDF con tamaños de hoja personalizados en Windows.
+
 ## [1.0.3] - 2026-06-29
 
 ### Corregido

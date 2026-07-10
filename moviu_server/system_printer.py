@@ -15,11 +15,13 @@ if platform.system() == "Windows":
     import win32print  # type: ignore
     import win32ui  # type: ignore
     import win32con  # type: ignore
+    import win32gui  # type: ignore
     from PIL import ImageWin  # type: ignore
 else:
     win32print = None  # type: ignore
     win32ui = None  # type: ignore
     win32con = None  # type: ignore
+    win32gui = None  # type: ignore
     ImageWin = None  # type: ignore
 
 
@@ -186,6 +188,7 @@ def print_pdf_to_system_printer(
     assert win32print is not None
     assert win32ui is not None
     assert win32con is not None
+    assert win32gui is not None
     assert ImageWin is not None
 
     # Get printer name
@@ -213,16 +216,11 @@ def print_pdf_to_system_printer(
             paper_height_mm,
         )
 
-    try:
-        # Create device context for printer
-        hdc = win32ui.CreateDC()
-        if hdc is None:
-            raise SystemPrinterError("No se pudo crear el contexto de dispositivo de la impresora")
-        hdc.CreatePrinterDC(target_printer)
-
-        if paper_size_code is not None or (
-            custom_paper_width_tenths is not None and custom_paper_height_tenths is not None
-        ):
+    configured_devmode = None
+    if paper_size_code is not None or (
+        custom_paper_width_tenths is not None and custom_paper_height_tenths is not None
+    ):
+        try:
             handle = win32print.OpenPrinter(target_printer)
             try:
                 printer_info = win32print.GetPrinter(handle, 2)
@@ -246,24 +244,48 @@ def print_pdf_to_system_printer(
                     devmode.PaperLength = custom_paper_height_tenths
                     devmode.Fields |= win32con.DM_PAPERWIDTH | win32con.DM_PAPERLENGTH
 
-                hdc.ResetDC(devmode)
+                configured_devmode = devmode
             finally:
                 win32print.ClosePrinter(handle)
+        except Exception as exc:
+            raise SystemPrinterError(f"Error al configurar tamaño de hoja: {exc}") from exc
 
-            if paper_size_code is not None:
-                logger.info(
-                    "Tamaño de hoja solicitado para %s: %s (código %d)",
-                    target_printer,
-                    paper_size,
-                    paper_size_code,
-                )
-            else:
-                logger.info(
-                    "Tamaño de hoja personalizado para %s: %.2fmm x %.2fmm",
-                    target_printer,
-                    paper_width_mm,
-                    paper_height_mm,
-                )
+        if paper_size_code is not None:
+            logger.info(
+                "Tamaño de hoja solicitado para %s: %s (código %d)",
+                target_printer,
+                paper_size,
+                paper_size_code,
+            )
+        else:
+            logger.info(
+                "Tamaño de hoja personalizado para %s: %.2fmm x %.2fmm",
+                target_printer,
+                paper_width_mm,
+                paper_height_mm,
+            )
+
+    hdc = None
+    try:
+        # Create device context for printer. PyCDC has no ResetDC in some pywin32 builds,
+        # so pass the DEVMODE when creating the underlying Windows DC.
+        if configured_devmode is not None:
+            hdc_handle = win32gui.CreateDC("WINSPOOL", target_printer, configured_devmode)
+            if not hdc_handle:
+                raise SystemPrinterError("No se pudo crear el contexto de dispositivo de la impresora")
+            try:
+                hdc = win32ui.CreateDCFromHandle(hdc_handle)
+            except Exception:
+                win32gui.DeleteDC(hdc_handle)
+                raise
+            if hdc is None:
+                win32gui.DeleteDC(hdc_handle)
+                raise SystemPrinterError("No se pudo crear el contexto de dispositivo de la impresora")
+        else:
+            hdc = win32ui.CreateDC()
+            if hdc is None:
+                raise SystemPrinterError("No se pudo crear el contexto de dispositivo de la impresora")
+            hdc.CreatePrinterDC(target_printer)
 
         # Get printer capabilities
         printable_width = hdc.GetDeviceCaps(win32con.HORZRES)
@@ -299,6 +321,7 @@ def print_pdf_to_system_printer(
 
         hdc.EndDoc()
         hdc.DeleteDC()
+        hdc = None
 
         logger.info("PDF enviado a %s (%d páginas)", target_printer, len(images))
         result: dict[str, object] = {
@@ -316,6 +339,9 @@ def print_pdf_to_system_printer(
 
     except Exception as exc:
         raise SystemPrinterError(f"Error al imprimir: {exc}") from exc
+    finally:
+        if hdc is not None:
+            hdc.DeleteDC()
 
 
 def print_pdf_raw_to_printer(

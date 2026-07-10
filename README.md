@@ -242,7 +242,7 @@ Usa el modo `zpl` para impresoras de etiquetas:
    cp dist/moviu-print-server dist/deb/usr/local/bin/moviu-print-server
    cat > dist/deb/DEBIAN/control <<'EOF'
    Package: moviu-print-server
-   Version: 1.0.0
+   Version: 1.0.4
    Section: utils
    Priority: optional
    Architecture: amd64
@@ -448,4 +448,3 @@ discoverMoviuServersNative(3000).then((servers) => {
 ```
 
 **Dependencia npm:** `npm install multicast-dns`
-
