@@ -35,6 +35,35 @@ from .mdns import MoviuServiceAnnouncer, get_local_ip
 from .updater import check_for_updates, open_release_page
 
 
+def _suppress_windows_connection_reset_noise() -> None:
+    """Ignore benign WinError 10054 raised while closing HTTPS connections."""
+    if not sys.platform.startswith("win"):
+        return
+
+    try:
+        from asyncio import proactor_events
+    except Exception:
+        return
+
+    transport_cls = proactor_events._ProactorBasePipeTransport
+    if getattr(transport_cls, "_moviu_connection_reset_patch", False):
+        return
+
+    original = transport_cls._call_connection_lost
+
+    def patched_call_connection_lost(self, exc):
+        try:
+            return original(self, exc)
+        except ConnectionResetError as err:
+            if getattr(err, "winerror", None) == 10054:
+                logging.debug("Conexión HTTPS cerrada por el cliente durante cleanup: %s", err)
+                return None
+            raise
+
+    transport_cls._call_connection_lost = patched_call_connection_lost
+    transport_cls._moviu_connection_reset_patch = True
+
+
 class ServerController:
     """Manage the uvicorn server on a background thread."""
 
@@ -48,6 +77,7 @@ class ServerController:
         if self.server and self.server.started:
             return
         _ensure_streams()
+        _suppress_windows_connection_reset_noise()
         # Generate certificate for localhost, internal IP and configured host
         cert_hosts = ["localhost", "127.0.0.1", get_local_ip()]
         if self.config.host not in ("0.0.0.0", "127.0.0.1", "localhost"):

@@ -2,6 +2,11 @@
 
 Todos los cambios notables en este proyecto serán documentados en este archivo.
 
+## [1.0.5] - 2026-07-09
+
+### Corregido
+- Se silencia el traceback benigno `WinError 10054` que Windows puede registrar al cerrar conexiones HTTPS ya terminadas por el cliente.
+
 ## [1.0.4] - 2026-07-09
 
 ### Corregido
