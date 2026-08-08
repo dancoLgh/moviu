@@ -20,6 +20,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("python -m unittest discover -s tests -v", self.workflow)
         self.assertIn("needs: test", self.workflow)
         self.assertIn("Validate tag matches application version", self.workflow)
+        self.assertIn("PYSTRAY_BACKEND: dummy", self.workflow)
 
     def test_both_release_binaries_are_built_from_spec(self):
         self.assertIn("windows-2022", self.workflow)

@@ -24,6 +24,8 @@ env:
 jobs:
   test:
     runs-on: ubuntu-22.04
+    env:
+      PYSTRAY_BACKEND: dummy
     steps:
       - name: Check out tagged source
         uses: actions/checkout@v4
