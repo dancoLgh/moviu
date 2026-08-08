@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import base64
 import logging
+from pathlib import Path
 from typing import Optional, Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, Field
 
+from .certificate_portal import render_certificate_portal
+from .certs import ca_certificate_path, certificate_sha256_fingerprint
 from .config import AppConfig, VERSION
 from .printer import PrintJob, PrintProcessor, PrinterError
 from .usb_bridge import discover_printers
@@ -23,10 +27,64 @@ from .mdns import discover_moviu_servers
 LOGGER = logging.getLogger(__name__)
 
 
+def certificate_http_port(api_port: int) -> int:
+    """Return the dedicated HTTP bootstrap port next to the HTTPS API port."""
+
+    if not 1 <= api_port < 65535:
+        raise ValueError("El puerto HTTPS debe estar entre 1 y 65534")
+    return api_port + 1
+
+
+def _register_certificate_routes(app: FastAPI, config: AppConfig) -> None:
+    @app.get("/certificado", response_class=HTMLResponse, include_in_schema=False)
+    def certificate_portal(request: Request) -> HTMLResponse:
+        ca_path = ca_certificate_path(Path(config.ssl_cert_path))
+        fingerprint = certificate_sha256_fingerprint(ca_path) if ca_path.is_file() else None
+        content = render_certificate_portal(
+            server_url=str(request.base_url).rstrip("/"),
+            download_url="/certificado/descargar",
+            fingerprint=fingerprint,
+        )
+        return HTMLResponse(
+            content,
+            headers={
+                "Cache-Control": "no-store",
+                "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+
+    @app.get("/certificado/descargar", include_in_schema=False)
+    def download_ca_certificate() -> FileResponse:
+        ca_path = ca_certificate_path(Path(config.ssl_cert_path))
+        if not ca_path.is_file():
+            raise HTTPException(status_code=404, detail="El certificado CA todavía no fue generado")
+        return FileResponse(
+            ca_path,
+            media_type="application/x-x509-ca-cert",
+            filename="moviu-ca.crt",
+            headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+        )
+
+
+def create_certificate_api(config: AppConfig) -> FastAPI:
+    """Create the isolated HTTP app used only to bootstrap certificate trust."""
+
+    app = FastAPI(
+        title="Moviu Certificate Portal",
+        version=VERSION,
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+    )
+    _register_certificate_routes(app, config)
+    return app
+
+
 class PrinterSettings(BaseModel):
     host: Optional[str] = Field(None, description="Host/IP del printer (para impresoras de red)")
     port: Optional[int] = Field(None, description="Puerto TCP del printer (para impresoras de red)")
-    name: Optional[str] = Field(None, description="Nombre de impresora local (para pdf_system)")
+    name: Optional[str] = Field(None, description="Nombre de impresora local (para modo pdf)")
 
 
 class PrintRequest(BaseModel):
@@ -77,11 +135,11 @@ class PrintResponse(BaseModel):
     host: Optional[str] = None
     port: Optional[int] = None
     bytes: Optional[int] = None
-    printer: Optional[str] = Field(None, description="Nombre de impresora local (para pdf_system)")
-    pages: Optional[int] = Field(None, description="Paginas impresas (para pdf_system)")
-    paper_size: Optional[str] = Field(None, description="Tamano de hoja aplicado (para pdf_system)")
-    paper_width_mm: Optional[float] = Field(None, description="Ancho de hoja aplicado en mm (para pdf_system)")
-    paper_height_mm: Optional[float] = Field(None, description="Alto de hoja aplicado en mm (para pdf_system)")
+    printer: Optional[str] = Field(None, description="Nombre de impresora local (para modo pdf)")
+    pages: Optional[int] = Field(None, description="Paginas impresas (para modo pdf)")
+    paper_size: Optional[str] = Field(None, description="Tamano de hoja aplicado (para modo pdf)")
+    paper_width_mm: Optional[float] = Field(None, description="Ancho de hoja aplicado en mm (para modo pdf)")
+    paper_height_mm: Optional[float] = Field(None, description="Alto de hoja aplicado en mm (para modo pdf)")
     message: Optional[str] = Field(None, description="Mensaje descriptivo")
     preview: Optional[dict] = Field(None, description="Vista previa del trabajo si aplica")
 

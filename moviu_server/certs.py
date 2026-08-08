@@ -276,6 +276,13 @@ def export_ca_certificate(destination: Path, server_cert_path: Path) -> Path:
     return export_certificate(destination, ca_certificate_path(server_cert_path))
 
 
+def certificate_sha256_fingerprint(cert_path: Path) -> str:
+    """Return the conventional colon-separated SHA-256 certificate fingerprint."""
+
+    digest = _load_certificate(cert_path).fingerprint(hashes.SHA256()).hex().upper()
+    return ":".join(digest[index : index + 2] for index in range(0, len(digest), 2))
+
+
 def certificates_folder() -> Path:
     """Return the folder that holds the generated keys/certs."""
 

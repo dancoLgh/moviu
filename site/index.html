@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#07111f">
+  <meta name="description" content="Moviu Print Server conecta aplicaciones web con impresoras locales y de red mediante una API HTTPS simple.">
+  <meta property="og:title" content="Moviu Print Server">
+  <meta property="og:description" content="Impresión local para aplicaciones web, sin convertir la configuración en otro proyecto.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://dancolgh.github.io/moviu/">
+  <title>Moviu Print Server | Impresión local para aplicaciones web</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="script.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Ir al contenido</a>
+
+  <header class="site-header" data-header>
+    <div class="header-inner">
+      <a class="brand" href="#inicio" aria-label="Moviu Print Server, inicio">
+        <svg class="brand-mark" viewBox="0 0 48 48" aria-hidden="true">
+          <path d="M6 11.5a4 4 0 0 1 6.4-3.2L24 17l11.6-8.7A4 4 0 0 1 42 11.5V35a4 4 0 0 1-4 4h-7l-7-12-7 12H10a4 4 0 0 1-4-4Z"/>
+          <path class="brand-paper" d="M20 25h15l-2 16-9-3-8 3Z"/>
+        </svg>
+        <span>moviu</span>
+        <small>Print Server</small>
+      </a>
+
+      <button class="menu-button" type="button" aria-expanded="false" aria-controls="site-nav" data-menu-button>
+        <span></span><span></span><span></span>
+        <span class="sr-only">Abrir menú</span>
+      </button>
+
+      <nav class="site-nav" id="site-nav" aria-label="Navegación principal" data-menu>
+        <a href="#producto">Producto</a>
+        <a href="#formatos">Formatos</a>
+        <a href="#historia">Historia</a>
+        <a href="#desarrolladores">API</a>
+        <a href="https://github.com/dancoLgh/moviu" target="_blank" rel="noreferrer">GitHub</a>
+        <a class="nav-cta" href="#descargas">Descargar</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero" id="inicio">
+      <div class="hero-glow hero-glow-one"></div>
+      <div class="hero-glow hero-glow-two"></div>
+      <div class="hero-grid">
+        <div class="hero-copy reveal">
+          <a class="eyebrow" href="#historia">
+            <span class="eyebrow-dot"></span>
+            100% construido con vibe coding
+          </a>
+          <h1>Tu aplicación web.<br><span>Tu impresora local.</span><br>Sin vueltas.</h1>
+          <p class="hero-lead">Moviu convierte HTML, imágenes, PDF, ESC/POS y ZPL en trabajos de impresión desde una API HTTPS local, sencilla de instalar y fácil de operar.</p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="#descargas">
+              Descargar Moviu
+              <span aria-hidden="true">↓</span>
+            </a>
+            <a class="button button-secondary" href="https://github.com/dancoLgh/moviu/blob/main/docs/API_INTEGRACION.md">Ver documentación</a>
+          </div>
+          <div class="hero-proof" aria-label="Características principales">
+            <span><i class="status-dot"></i> Código abierto</span>
+            <span>Windows y Linux</span>
+            <span>API local segura</span>
+          </div>
+        </div>
+
+        <div class="product-stage reveal" aria-label="Vista conceptual de Moviu Print Server">
+          <div class="stage-orbit orbit-one"></div>
+          <div class="stage-orbit orbit-two"></div>
+          <div class="app-window">
+            <div class="window-bar">
+              <div class="window-brand">
+                <svg viewBox="0 0 48 48" aria-hidden="true">
+                  <path d="M6 11.5a4 4 0 0 1 6.4-3.2L24 17l11.6-8.7A4 4 0 0 1 42 11.5V35a4 4 0 0 1-4 4h-7l-7-12-7 12H10a4 4 0 0 1-4-4Z"/>
+                </svg>
+                <span>moviu</span>
+              </div>
+              <div class="window-controls"><i></i><i></i><i></i></div>
+            </div>
+            <div class="window-layout">
+              <aside class="mock-sidebar">
+                <span class="mock-label">NAVEGACIÓN</span>
+                <div class="mock-nav active"><b>⌂</b> Inicio</div>
+                <div class="mock-nav"><b>▤</b> Impresoras</div>
+                <div class="mock-nav"><b>⌁</b> Conexión</div>
+                <div class="mock-nav"><b>◌</b> Actividad</div>
+                <div class="mock-nav"><b>⚙</b> Configuración</div>
+              </aside>
+              <div class="mock-main">
+                <div class="mock-topbar">
+                  <strong>Inicio</strong>
+                  <span>Panel avanzado</span>
+                </div>
+                <div class="mock-content">
+                  <div class="server-card">
+                    <div>
+                      <span class="mock-label">ESTADO DEL SERVICIO</span>
+                      <h3>Todo listo para imprimir</h3>
+                      <p>Moviu está conectado en https://192.168.1.24:9000</p>
+                    </div>
+                    <span class="online-badge"><i></i> Servidor activo</span>
+                  </div>
+                  <div class="mock-cards">
+                    <div class="mock-card">
+                      <span class="mock-label">IMPRESORA</span>
+                      <strong>POS-80C</strong>
+                      <p>192.168.1.50:9100</p>
+                      <div class="mock-line"><i></i><i></i><i></i></div>
+                    </div>
+                    <div class="mock-card">
+                      <span class="mock-label">ÚLTIMO TRABAJO</span>
+                      <strong>Pedido #1042</strong>
+                      <p>HTML · 3.2 KB · enviado</p>
+                      <div class="receipt-mini">
+                        <span></span><span></span><span></span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="floating-status status-printer">
+            <span class="floating-icon">▣</span>
+            <div><small>Impresora</small><strong>Conectada</strong></div>
+            <i></i>
+          </div>
+          <div class="floating-status status-api">
+            <span class="floating-icon">⌁</span>
+            <div><small>API HTTPS</small><strong>Lista</strong></div>
+            <i></i>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="statement section" id="producto">
+      <div class="section-inner statement-grid">
+        <div class="section-heading reveal">
+          <span class="section-kicker">EL PROBLEMA</span>
+          <h2>Imprimir desde la web no debería ser complicado.</h2>
+        </div>
+        <div class="statement-copy reveal">
+          <p>Los navegadores aíslan el acceso a las impresoras por seguridad. Resolver esa distancia suele traer instaladores pesados, configuración repetitiva y certificados que terminan siendo parte del problema.</p>
+          <p>Moviu concentra ese trabajo en un servicio local pequeño y visible. Configurás una vez, consumís una API clara y seguís construyendo tu aplicación.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="steps section">
+      <div class="section-inner">
+        <div class="section-heading centered reveal">
+          <span class="section-kicker">DE CERO A IMPRIMIR</span>
+          <h2>Tres pasos. Ningún ritual.</h2>
+          <p>Una puesta en marcha pensada para equipos que quieren resolver el problema y seguir adelante.</p>
+        </div>
+        <div class="step-grid">
+          <article class="step-card reveal">
+            <span class="step-number">01</span>
+            <div class="step-icon">↓</div>
+            <h3>Instalá</h3>
+            <p>Descargá un único ejecutable para Windows o Linux. Sin servicios externos ni cuentas obligatorias.</p>
+          </article>
+          <article class="step-card reveal">
+            <span class="step-number">02</span>
+            <div class="step-icon">⌁</div>
+            <h3>Conectá</h3>
+            <p>Elegí la impresora, generá el certificado y copiá la URL y la API key desde el panel.</p>
+          </article>
+          <article class="step-card reveal">
+            <span class="step-number">03</span>
+            <div class="step-icon">▤</div>
+            <h3>Imprimí</h3>
+            <p>Enviá un JSON desde cualquier stack. Moviu renderiza y enruta el trabajo por vos.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="formats section" id="formatos">
+      <div class="section-inner formats-layout">
+        <div class="formats-copy reveal">
+          <span class="section-kicker">UN SOLO PUENTE</span>
+          <h2>Del navegador al papel, en el formato correcto.</h2>
+          <p>Moviu cubre tickets, documentos, comandos directos y etiquetas sin obligar a tu aplicación a conocer los detalles de cada impresora.</p>
+          <a class="text-link" href="https://github.com/dancoLgh/moviu/blob/main/docs/API_INTEGRACION.md">Explorar todos los payloads <span>→</span></a>
+        </div>
+        <div class="format-grid reveal">
+          <article class="format-card feature-format">
+            <span class="format-tag">WEB</span>
+            <div class="format-symbol">&lt;/&gt;</div>
+            <h3>HTML e imágenes</h3>
+            <p>Renderizado optimizado y segmentado para impresoras térmicas.</p>
+          </article>
+          <article class="format-card">
+            <span class="format-tag">DOC</span>
+            <div class="format-symbol">PDF</div>
+            <h3>PDF</h3>
+            <p>Impresoras locales o de red, hojas estándar o personalizadas.</p>
+          </article>
+          <article class="format-card">
+            <span class="format-tag">RAW</span>
+            <div class="format-symbol">01</div>
+            <h3>ESC/POS</h3>
+            <p>Bytes, texto con escapes y trabajos híbridos.</p>
+          </article>
+          <article class="format-card">
+            <span class="format-tag">LABEL</span>
+            <div class="format-symbol">ZPL</div>
+            <h3>Etiquetas</h3>
+            <p>Comandos ZPL directos para impresoras Zebra.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="story section" id="historia">
+      <div class="story-noise"></div>
+      <div class="section-inner story-grid">
+        <div class="story-mark reveal" aria-hidden="true">
+          <div class="story-ring ring-one"></div>
+          <div class="story-ring ring-two"></div>
+          <div class="vibe-core">
+            <span>100%</span>
+            <strong>VIBE<br>CODING</strong>
+          </div>
+        </div>
+        <div class="story-copy reveal">
+          <span class="section-kicker">NUESTRA HISTORIA</span>
+          <h2>Una necesidad real, convertida en producto con IA.</h2>
+          <p class="story-lead">Moviu fue creado completamente mediante vibe coding: criterio humano para definir el problema, inteligencia artificial para acelerar la construcción y validación práctica para decidir qué funciona.</p>
+          <p>Nació buscando una experiencia más directa que alternativas como QZ Tray o JSPrintManager para proyectos que no necesitan todo su ecosistema. El objetivo no fue copiar una herramienta existente, sino reducir la distancia entre una aplicación web y una impresora.</p>
+          <div class="story-values">
+            <span><i>01</i> Problema concreto</span>
+            <span><i>02</i> Iteración abierta</span>
+            <span><i>03</i> Uso práctico</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="developer section" id="desarrolladores">
+      <div class="section-inner developer-grid">
+        <div class="developer-copy reveal">
+          <span class="section-kicker">PARA DESARROLLADORES</span>
+          <h2>Una API que se explica sola.</h2>
+          <p>Un endpoint principal, autenticación por cabecera y payloads JSON. Usá el lenguaje y framework que ya tiene tu proyecto.</p>
+          <ul class="check-list">
+            <li><i>✓</i> REST sobre HTTPS local</li>
+            <li><i>✓</i> API key regenerable</li>
+            <li><i>✓</i> Simulación sin hardware</li>
+            <li><i>✓</i> Descubrimiento mDNS</li>
+          </ul>
+          <a class="button button-secondary" href="https://github.com/dancoLgh/moviu/blob/main/docs/API_INTEGRACION.md">Referencia completa</a>
+        </div>
+        <div class="code-window reveal">
+          <div class="code-header">
+            <div><i></i><i></i><i></i></div>
+            <span>print-job.js</span>
+            <button type="button" data-copy-code aria-label="Copiar ejemplo de código">Copiar</button>
+          </div>
+          <pre><code data-code><span class="code-purple">await</span> fetch(<span class="code-green">"https://127.0.0.1:9000/api/print"</span>, {
+  method: <span class="code-green">"POST"</span>,
+  headers: {
+    <span class="code-green">"X-API-Key"</span>: apiKey,
+    <span class="code-green">"Content-Type"</span>: <span class="code-green">"application/json"</span>
+  },
+  body: JSON.stringify({
+    mode: <span class="code-green">"html"</span>,
+    content: <span class="code-green">"&lt;h1&gt;Pedido #1042&lt;/h1&gt;"</span>,
+    printer: {
+      host: <span class="code-green">"192.168.1.50"</span>,
+      port: <span class="code-blue">9100</span>
+    }
+  })
+});</code></pre>
+          <div class="code-response"><i></i><span>200 OK</span><code>{ "status": "sent", "bytes": 3284 }</code></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="security section">
+      <div class="section-inner security-card reveal">
+        <div class="security-icon">◇</div>
+        <div>
+          <span class="section-kicker">LOCAL Y BAJO TU CONTROL</span>
+          <h2>La seguridad no desaparece. Se vuelve manejable.</h2>
+          <p>Moviu genera una CA local, protege la API con una clave y permite exportar el certificado desde la interfaz. Tus trabajos y credenciales permanecen en tu red.</p>
+        </div>
+        <div class="security-points">
+          <span><i>✓</i> HTTPS local</span>
+          <span><i>✓</i> API key</span>
+          <span><i>✓</i> Sin nube obligatoria</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="downloads section" id="descargas">
+      <div class="section-inner">
+        <div class="section-heading centered reveal">
+          <span class="section-kicker">EMPEZÁ AHORA</span>
+          <h2>Elegí tu plataforma.</h2>
+          <p>Binarios compilados desde el código del release publicado.</p>
+        </div>
+        <div class="download-grid">
+          <article class="download-card primary-download reveal">
+            <span class="platform-icon windows-icon" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+            <div>
+              <span class="recommended">RECOMENDADO</span>
+              <h3>Windows</h3>
+              <p>x86-64 · Aplicación de escritorio</p>
+            </div>
+            <a class="button button-primary" href="https://github.com/dancoLgh/moviu/releases/latest/download/MoviuPrintServer-Windows-x86_64.exe">Descargar .exe <span>↓</span></a>
+          </article>
+          <article class="download-card reveal">
+            <span class="platform-icon linux-icon" aria-hidden="true">⌁</span>
+            <div>
+              <h3>Linux</h3>
+              <p>x86-64 · Binario ejecutable</p>
+            </div>
+            <a class="button button-secondary" href="https://github.com/dancoLgh/moviu/releases/latest/download/MoviuPrintServer-Linux-x86_64">Descargar <span>↓</span></a>
+          </article>
+          <article class="download-card reveal">
+            <span class="platform-icon source-icon" aria-hidden="true">&lt;/&gt;</span>
+            <div>
+              <h3>Código fuente</h3>
+              <p>Python · Licencia MIT</p>
+            </div>
+            <a class="button button-secondary" href="https://github.com/dancoLgh/moviu">Ver en GitHub <span>↗</span></a>
+          </article>
+        </div>
+        <p class="release-link reveal">Versión actual <strong>v1.1.0</strong> · <a href="https://github.com/dancoLgh/moviu/releases">Ver todos los releases</a></p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="section-inner footer-grid">
+      <div>
+        <a class="brand footer-brand" href="#inicio">
+          <svg class="brand-mark" viewBox="0 0 48 48" aria-hidden="true">
+            <path d="M6 11.5a4 4 0 0 1 6.4-3.2L24 17l11.6-8.7A4 4 0 0 1 42 11.5V35a4 4 0 0 1-4 4h-7l-7-12-7 12H10a4 4 0 0 1-4-4Z"/>
+          </svg>
+          <span>moviu</span>
+        </a>
+        <p>Impresión local para aplicaciones web.<br>Construido 100% con vibe coding.</p>
+      </div>
+      <div class="footer-links">
+        <strong>Producto</strong>
+        <a href="#formatos">Formatos</a>
+        <a href="#descargas">Descargas</a>
+        <a href="https://github.com/dancoLgh/moviu/releases">Releases</a>
+      </div>
+      <div class="footer-links">
+        <strong>Desarrolladores</strong>
+        <a href="https://github.com/dancoLgh/moviu/blob/main/docs/API_INTEGRACION.md">API</a>
+        <a href="https://github.com/dancoLgh/moviu/blob/main/docs/INSTALLATION.md">Instalación</a>
+        <a href="https://github.com/dancoLgh/moviu">GitHub</a>
+      </div>
+    </div>
+    <div class="section-inner footer-bottom">
+      <span>© <span data-year>2026</span> Moviu. Código abierto bajo licencia MIT.</span>
+      <span>Hecho con intención, iteración e IA.</span>
+    </div>
+  </footer>
+</body>
+</html>

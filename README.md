@@ -1,450 +1,148 @@
 # Moviu Print Server
 
-Servidor de impresión local para convertir HTML → imagen → ESC/POS y exponer una API HTTP protegida con API key.
+> Impresion local para aplicaciones web, sin convertir la configuracion en otro proyecto.
 
-## Características
+[![Latest release](https://img.shields.io/github/v/release/dancoLgh/moviu?style=flat-square&color=2d6cdf)](https://github.com/dancoLgh/moviu/releases/latest)
+[![GitHub Pages](https://img.shields.io/badge/web-GitHub%20Pages-08cfe8?style=flat-square)](https://dancolgh.github.io/moviu/)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776ab?style=flat-square)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-MIT-32c36c?style=flat-square)](LICENSE)
+[![Vibe coded](https://img.shields.io/badge/built%20with-100%25%20vibe%20coding-7c8cff?style=flat-square)](#100-vibe-coding)
 
-- Aplicación de escritorio (Tkinter) que inicia/detiene el servidor con visor de logs.
-- API REST (`FastAPI`) accesible mediante `X-API-Key` y servido sobre HTTPS con certificado de servidor firmado por una CA local autogenerada.
-- **Modos soportados:**
-  - `html` / `image` — Impresoras térmicas (ESC/POS)
-  - `pdf` — Modo unificado: impresoras térmicas (red) o del sistema (local)
-  - `raw` / `raw_text` — Comandos ESC/POS directos
-  - `hybrid` — Cabecera con imagen + comandos ESC/POS personalizados
-  - `zpl` — Impresoras de etiquetas Zebra
-- Enrutamiento a impresoras de red vía TCP o impresoras locales por nombre.
-- Modo de simulación que guarda trabajos en disco para desarrollo.
-- Puente TCP → USB para impresoras USB de Windows.
-- Descubrimiento de servicios mDNS/DNS-SD (Bonjour/Avahi).
+Moviu Print Server conecta aplicaciones web con impresoras locales o de red mediante una API HTTPS sencilla. Recibe HTML, imagenes, PDF, ESC/POS o ZPL y los dirige a impresoras termicas, impresoras del sistema o equipos de etiquetas.
 
-## Requisitos
+[Conocer Moviu](https://dancolgh.github.io/moviu/) · [Descargar](https://github.com/dancoLgh/moviu/releases/latest) · [Integrar la API](docs/API_INTEGRACION.md) · [Ver cambios](CHANGELOG.md)
+
+## Por que existe
+
+Moviu nacio de una necesidad concreta: imprimir desde una aplicacion web no deberia exigir una instalacion pesada ni una configuracion de certificados dificil de repetir y mantener.
+
+Frente a alternativas como QZ Tray o JSPrintManager, Moviu propone una ruta enfocada para proyectos que buscan algo directo: instalar una aplicacion, elegir una impresora, iniciar el servicio y consumir una API local. No intenta reemplazar todas las capacidades de esas plataformas; prioriza una experiencia pequena, comprensible y facil de operar.
+
+## Que ofrece
+
+- Aplicacion de escritorio para configurar y supervisar el servidor.
+- API REST local protegida mediante `X-API-Key`.
+- HTTPS con generacion, exportacion e instalacion guiada de una CA local.
+- Impresoras de red por TCP e impresoras instaladas en Windows.
+- Puente TCP a USB integrado para impresoras locales.
+- Descubrimiento mDNS/DNS-SD mediante Bonjour o Avahi.
+- Modo de simulacion con vistas previas para desarrollar sin gastar papel.
+- Actualizaciones desde GitHub Releases y soporte para repositorios privados.
+
+## Descarga rapida
+
+| Plataforma | Descarga | Notas |
+|---|---|---|
+| Windows x86-64 | [Descargar `.exe`](https://github.com/dancoLgh/moviu/releases/latest/download/MoviuPrintServer-Windows-x86_64.exe) | Experiencia principal; incluye impresoras del sistema y puente USB |
+| Linux x86-64 | [Descargar binario](https://github.com/dancoLgh/moviu/releases/latest/download/MoviuPrintServer-Linux-x86_64) | Interfaz grafica, impresion de red y simulacion |
+| Codigo fuente | [Ver releases](https://github.com/dancoLgh/moviu/releases) | Archivos `.zip` y `.tar.gz` generados por GitHub |
+
+Consulta la [guia de instalacion](docs/INSTALLATION.md) para el primer inicio, certificados, ejecucion desde codigo y empaquetado.
+
+## Tres pasos
+
+1. Instala Moviu y configura tu impresora local o de red.
+2. Inicia el servidor y copia la URL HTTPS y la API key.
+3. Envia el trabajo desde tu aplicacion.
 
 ```bash
+curl -k -X POST "https://127.0.0.1:9000/api/print" \
+  -H "X-API-Key: $MOVIU_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "mode": "html",
+    "content": "<h1>Pedido #1042</h1><p>Listo para retirar</p>",
+    "printer": {"host": "192.168.1.50", "port": 9100}
+  }'
+```
+
+En desarrollo puedes agregar `"simulate": true` para generar una vista previa sin enviar el trabajo a una impresora fisica.
+
+## Modos de impresion
+
+| Modo | Uso principal | Destino |
+|---|---|---|
+| `html` | Tickets y comprobantes desde HTML | Termica ESC/POS |
+| `image` | Logos, codigos y composiciones graficas | Termica ESC/POS |
+| `pdf` | Documentos y hojas de cualquier tamano | Local o red |
+| `raw` | Bytes ESC/POS en hexadecimal o Base64 | Termica |
+| `raw_text` | Texto con escapes y code page seleccionable | Termica |
+| `hybrid` | Imagen de cabecera seguida de comandos | Termica |
+| `zpl` | Etiquetas Zebra | Impresora ZPL |
+
+La referencia completa de payloads, respuestas, tamanos de papel y errores esta en [Integracion de la API](docs/API_INTEGRACION.md).
+
+## Arquitectura
+
+```mermaid
+flowchart LR
+    A[Aplicacion web] -->|HTTPS + API key| B[Moviu Print Server]
+    B --> C[Impresora de red]
+    B --> D[Impresora del sistema]
+    B --> E[Puente TCP a USB]
+    B --> F[Simulacion local]
+```
+
+Moviu se ejecuta en la misma red que las impresoras. La aplicacion web envia trabajos a la API local y Moviu se ocupa de renderizar, adaptar y enrutar el contenido.
+
+## Seguridad y certificados
+
+- Cada instalacion genera una API key local que puede regenerarse.
+- La comunicacion usa HTTPS con una CA creada por Moviu.
+- La interfaz permite exportar esa CA para instalarla en los dispositivos cliente.
+- El portal publico usa HTTP en `http://<ip-local>:<puerto-HTTPS + 1>/certificado`. Por ejemplo, con la API en `https://192.168.1.20:9000`, la guia queda en `http://192.168.1.20:9001/certificado`.
+- El listener HTTP solo expone la guia y la descarga de la CA; la API de impresion permanece exclusivamente en HTTPS.
+- Los certificados y la configuracion permanecen en `~/.moviu_printer/`.
+- El servicio esta pensado para redes locales confiables, no para exposicion directa a Internet.
+
+Moviu no elimina el modelo de confianza de HTTPS; simplifica su generacion y administracion para que la puesta en marcha sea repetible.
+
+El boton **Abrir portal de instalacion** muestra primero la huella SHA-256 local para poder compararla con la pagina. El boton **Habilitar acceso en la red local** abre en el firewall el puerto HTTPS, el puerto HTTP de certificados y, si esta activo, el puerto del puente TCP a USB. En Windows las reglas usan `LocalSubnet`; en Linux usan las subredes IPv4 conectadas mediante UFW o firewalld. El puerto de una impresora remota no se abre porque esa conexion es saliente.
+
+## 100% vibe coding
+
+Moviu fue creado completamente mediante **vibe coding**. El proyecto comenzo con un problema real y evoluciono a traves de iteraciones asistidas por inteligencia artificial, pruebas practicas y ajustes sobre impresoras y flujos concretos.
+
+Esto forma parte de la identidad del proyecto: demostrar que una necesidad operativa puede convertirse en una herramienta abierta y util combinando criterio humano, experimentacion y asistencia de IA. El codigo, sus decisiones y sus limitaciones permanecen visibles para que cualquiera pueda revisarlos y mejorarlos.
+
+## Desarrollo local
+
+```bash
+git clone https://github.com/dancoLgh/moviu.git
+cd moviu
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+python main.py
 ```
 
-## Uso
+Para ejecutar las pruebas:
 
-1. Ejecuta la aplicación de escritorio:
-   ```bash
-   python main.py
-   ```
-2. Configura host, puerto, datos de la impresora y guarda.
-3. Opcional: genera/descarga el certificado CA desde los botones "Generar certificados" y "Exportar Certificado CA" para instalarlo en tablets o clientes que consumen la API por HTTPS.
-4. Si quieres evitar envíos reales durante el desarrollo, activa "Simular impresora (solo desarrollo)" para que los trabajos se guarden en `~/.moviu_printer/simulated_jobs/` con una copia binaria (`.bin`) y, cuando aplique, una vista previa en texto (`.txt`/`.hex`) o imagen (`.png`). El log indica la ruta de cada trabajo simulado y el botón "Abrir simulaciones" abre la carpeta. La respuesta de la API también incluirá un bloque `preview` con texto/HTML/hex y la imagen en base64 cuando la simulación esté activa.
-5. Inicia el servidor desde la propia interfaz. La API key se muestra en la ventana y el log en la parte inferior.
-
-### Endpoint principal
-
-`POST /api/print`
-
-Cabecera obligatoria: `X-API-Key: <valor mostrado en la app>`
-
-Ejemplo de payload para HTML:
-
-```json
-{
-  "mode": "html",
-  "content": "<h1>Ticket</h1><p>Gracias por tu compra</p>",
-  "printer": {
-    "host": "192.168.1.50",
-    "port": 9100
-  }
-}
+```bash
+pip install -r requirements-dev.txt
+python -m unittest discover -s tests
 ```
 
-Ejemplo para enviar comandos ESC/POS ya preparados (hexadecimal):
+## Publicar una version
 
-```json
-{
-  "mode": "raw",
-  "content": "1b4068656c6c6f0a1d5630"
-}
+Las releases se generan automaticamente al subir una etiqueta `v*`. Antes de crearla, actualiza `VERSION` en `moviu_server/config.py` y confirma que coincida con la etiqueta:
+
+```bash
+git tag v1.1.0
+git push origin v1.1.0
 ```
 
-Para forzar la impresora virtual en un entorno de desarrollo sin cambiar la configuración global, añade `"simulate": true` al payload. La respuesta incluirá un bloque `preview` con copias en texto/hex/HTML y, si aplica, la imagen en base64.
+GitHub Actions ejecuta las pruebas, compila Windows y Linux, genera las notas de la release y publica ambos binarios. Si alguna prueba o compilacion falla, la release no se crea.
 
-También puedes enviar el binario en base64 (útil si generas bytes desde otra librería) usando la misma clave `content`.
+## Documentacion
 
-Si prefieres enviar la cadena binaria tal cual (sin hex ni base64), usa el modo `raw_text`:
-
-```json
-{
-  "mode": "raw_text",
-  "content": "\\x1b@\\x1ba\\x01Hola\\x0a\\x1dV\\x00"
-}
-```
-
-El modo `raw_text` interpreta las secuencias de escape (\n, \t, \x1b, etc.) sin romper los acentos y codifica el texto en la code page CP858 por defecto, insertando el comando `ESC t n` al inicio para forzar a la impresora a esa misma page. Si tu impresora usa otra code page (por ejemplo CP437 o CP1252), pásala en el campo opcional `code_page` y el servidor enviará el comando correspondiente antes del payload:
-
-```json
-{
-  "mode": "raw_text",
-  "code_page": "cp858",
-  "content": "\\x1b@Hola Sebasti\\xA2n\\x0a\\x1dV\\x00"
-}
-```
-
-Code pages soportadas para `raw_text`: `cp437` (ESC t 0), `cp850` (ESC t 2), `cp860` (ESC t 3), `cp863` (ESC t 4), `cp865` (ESC t 5), `cp1252`/`latin-1` (ESC t 6), `cp866` (ESC t 7), `cp852` (ESC t 8) y `cp858` (ESC t 9). Si pasas una no soportada, la API devuelve error de validación.
-
-### Imprimir en modo híbrido (Imagen + RAW)
-
-El modo `hybrid` permite enviar una imagen (cabecera) y comandos ESC/POS seguidos en un mismo trabajo, sin cortar el papel entre ellos. El `content` debe ser un objeto JSON con `image` y `commands` (ambos en base64 o hexadecimal):
-
-```json
-{
-  "mode": "hybrid",
-  "content": "{\"image\": \"data:image/png;base64,...\", \"commands\": \"1b4068656c6c6f0a1d5630\"}"
-}
-```
-
-O enviando el JSON directamente como cadena:
-
-```json
-{
-  "mode": "hybrid",
-  "content": {
-    "image": "iVBORw0KGgoAAAANSUhEUg...",
-    "commands": "G0BIZWxsbwoXVjA="
-  }
-}
-```
-
-> Nota: Si el cliente envía un objeto JSON real en `content` en lugar de una cadena, el servidor lo procesará correctamente siempre que la API lo reciba como string deserializado.
-
-### Imprimir PDFs (modo unificado)
-
-El modo `pdf` detecta automáticamente el destino y el tipo de envío según los campos de `printer`:
-
-**Impresora de red térmica (renderiza a ESC/POS):**
-```json
-{
-  "mode": "pdf",
-  "content": "JVBERi0xLjQN...",
-  "printer": {"host": "192.168.1.50", "port": 9100}
-}
-```
-
-**Impresora de red con soporte PDF (envío directo):**
-```json
-{
-  "mode": "pdf",
-  "content": "JVBERi0xLjQN...",
-  "printer": {"host": "192.168.1.100", "port": 9100},
-  "raw_mode": true
-}
-```
-
-**Impresora local del sistema (renderiza con Windows GDI):**
-```json
-{
-  "mode": "pdf",
-  "content": "JVBERi0xLjQN...",
-  "printer": {"name": "HP LaserJet Pro"},
-  "dpi": 300,
-  "paper_size": "A4"
-}
-```
-
-**Impresora local con tamaño personalizado (mm):**
-```json
-{
-  "mode": "pdf",
-  "content": "JVBERi0xLjQN...",
-  "printer": {"name": "HP LaserJet Pro"},
-  "dpi": 300,
-  "paper_width_mm": 80,
-  "paper_height_mm": 200
-}
-```
-
-**Impresora local con PDF directo (envío sin renderizar):**
-```json
-{
-  "mode": "pdf",
-  "content": "JVBERi0xLjQN...",
-  "printer": {"name": "Kyocera ECOSYS"},
-  "raw_mode": true
-}
-```
-
-| Destino | `raw_mode` | Comportamiento |
-|---------|------------|----------------|
-| `printer.name` | `false` | Renderiza con Windows GDI |
-| `printer.name` | `true` | Envía PDF directo al spooler |
-| `printer.host/port` | `false` | Renderiza a ESC/POS (térmicas) |
-| `printer.host/port` | `true` | Envía PDF directo por TCP |
-
-`paper_size` es opcional y aplica cuando imprimes PDF con `printer.name` y `raw_mode: false`. Puedes enviar alias como `A4`, `A5`, `Letter`, `Legal`, `Tabloid`, `Executive`, `B5` (también `carta`/`oficio`) o un código numérico `DMPAPER` de Windows.
-
-Si necesitas tamaño personalizado, usa `paper_width_mm` + `paper_height_mm` (ambos obligatorios juntos). No se puede combinar `paper_size` con `paper_width_mm`/`paper_height_mm` en la misma petición.
-
-### Imprimir etiquetas ZPL (Zebra)
-
-Usa el modo `zpl` para impresoras de etiquetas:
-
-```json
-{
-  "mode": "zpl",
-  "content": "^XA^FO50,50^ADN,36,20^FDHello World^FS^XZ",
-  "printer": {"host": "192.168.1.100", "port": 9100}
-}
-```
-
-### Listar impresoras disponibles
-
-`GET /api/printers` devuelve las impresoras instaladas en el sistema:
-
-```json
-{"printers": ["HP LaserJet Pro", "POS-80C"], "count": 2}
-```
-
-### Vista previa para modo desarrollo
-
-- Activa la casilla "Simular impresora" o envía `"simulate": true` en el cuerpo de la petición.
-- La API responderá con `status="simulated"` y un objeto `preview` que incluye:
-  - `text`, `hex` u `html` con el contenido recibido.
-  - `image_base64` cuando el modo genera imagen (HTML o image).
-  - `payload_path` con la ruta del `.bin` guardado y los puertos/host utilizados para la simulación.
-- Todos los artefactos quedan en `~/.moviu_printer/simulated_jobs/` y se pueden abrir desde el botón "Abrir simulaciones" de la app.
-
-## Generar instaladores
-
-### Windows (ejecutable .exe)
-
-1. Instala PyInstaller (solo para empaquetar):
-   ```powershell
-   pip install pyinstaller
-   ```
-2. Genera el ejecutable:
-   ```powershell
-   pyinstaller --noconfirm --noconsole --onefile --name MoviuPrintServer main.py
-   ```
-3. El binario queda en `dist/MoviuPrintServer.exe`. Copia todo el directorio `dist/` al equipo destino; al arrancar, la app crea `~/.moviu_printer/` con la configuración y certificados.
-4. Al abrir la app podrás iniciar o detener el servidor desde la propia interfaz.
-
-### Debian/Ubuntu (.deb)
-
-1. Instala dependencias de build (solo una vez):
-   ```bash
-   sudo apt-get update && sudo apt-get install -y python3-venv python3-dev build-essential debhelper
-   pip install pyinstaller
-   ```
-2. Crea el binario autónomo:
-   ```bash
-   pyinstaller --noconfirm --noconsole --onefile --name moviu-print-server main.py
-   ```
-3. Arma la estructura del paquete:
-   ```bash
-   mkdir -p dist/deb/DEBIAN dist/deb/usr/local/bin
-   cp dist/moviu-print-server dist/deb/usr/local/bin/moviu-print-server
-   cat > dist/deb/DEBIAN/control <<'EOF'
-   Package: moviu-print-server
-   Version: 1.0.4
-   Section: utils
-   Priority: optional
-   Architecture: amd64
-   Maintainer: moviu
-   Description: Servidor local de impresión ESC/POS con API HTTPS y app Tkinter
-   EOF
-   ```
-4. Genera el .deb:
-   ```bash
-   dpkg-deb --build dist/deb dist/moviu-print-server.deb
-   ```
-5. Instala en la máquina destino:
-   ```bash
-   sudo dpkg -i dist/moviu-print-server.deb
-   ```
-6. Al lanzar `/usr/local/bin/moviu-print-server` se abrirá la GUI y podrás iniciar/detener el servidor desde la aplicación.
-
-## Seguridad
-
-- La API solo responde cuando la cabecera `X-API-Key` coincide con la clave almacenada localmente.
-- Puedes regenerar la clave desde la interfaz; se guardará en `~/.moviu_printer/config.json`.
-- El servidor levanta HTTPS con `~/.moviu_printer/cert.pem` y `~/.moviu_printer/key.pem`, firmados por una CA local en `~/.moviu_printer/ca_cert.pem` (clave: `~/.moviu_printer/ca_key.pem`).
-- Usa "Exportar Certificado CA" para instalar `ca_cert.pem` en tablets/PCs clientes y evitar avisos de certificado.
+- [Instalacion y distribucion](docs/INSTALLATION.md)
+- [Integracion completa de la API](docs/API_INTEGRACION.md)
+- [Descubrimiento mDNS/DNS-SD](docs/DISCOVERY.md)
+- [Puente TCP a USB](tcp_usb_bridge/README.md)
+- [Historial de cambios](CHANGELOG.md)
+- [Releases publicados](https://github.com/dancoLgh/moviu/releases)
 
 ## Licencia
 
-MIT
-
----
-
-## Puente TCP → impresora USB
-
-En la propia aplicación encontrarás el apartado **"Puente TCP → Impresora USB"** para activar o detener el listener. Selecciona la impresora USB instalada en Windows, el puerto TCP de escucha y marca **"Arrancar puente automáticamente"** si quieres que se levante al iniciar Moviu. En sistemas no Windows los trabajos se guardan como simulaciones en `~/.tcp_usb_bridge/` para poder probar el flujo sin hardware real.
-
----
-
-## Descubrimiento de servicios (mDNS/DNS-SD)
-
-El servidor Moviu se anuncia automáticamente en la red local usando mDNS/DNS-SD (compatible con Bonjour/Avahi). Esto permite que los clientes descubran servidores sin conocer la IP previamente.
-
-### Endpoint de descubrimiento
-
-`GET /api/discover` — **No requiere autenticación**
-
-```bash
-curl -X GET "https://localhost:8443/api/discover?timeout=3"
-```
-
-Respuesta:
-
-```json
-{
-  "servers": [
-    {
-      "name": "Moviu Print Server._moviu-print._tcp.local.",
-      "port": 9050,
-      "addresses": ["192.168.1.156"],
-      "properties": {
-        "version": "1.0",
-        "protocol": "https",
-        "hostname": "DESKTOP-ABC123"
-      }
-    }
-  ],
-  "count": 1
-}
-```
-
-### Utilidad de línea de comandos
-
-Incluimos `discover.py` para buscar servidores desde la terminal:
-
-```bash
-# Búsqueda básica (3 segundos)
-python discover.py
-
-# Con timeout personalizado
-python discover.py --timeout 5
-
-# Salida JSON (para scripts)
-python discover.py --json
-
-# Modo detallado
-python discover.py --verbose
-```
-
-### Compilar la utilidad discover.py
-
-Para distribuir la utilidad como ejecutable independiente:
-
-#### Windows
-
-```powershell
-pyinstaller --noconfirm --onefile --name MoviuDiscover discover.py
-```
-
-El ejecutable queda en `dist/MoviuDiscover.exe`.
-
-#### Linux/macOS
-
-```bash
-pyinstaller --noconfirm --onefile --name moviu-discover discover.py
-```
-
-### Descubrimiento desde JavaScript (Browser/Node.js)
-
-Dado que los navegadores no pueden hacer mDNS directamente, usa el endpoint HTTP del servidor:
-
-```javascript
-/**
- * Descubre servidores Moviu Print Server en la red local.
- * Requiere conocer al menos un servidor para hacer la consulta inicial.
- * 
- * @param {string} knownServerUrl - URL de un servidor conocido (ej: https://192.168.1.100:8443)
- * @param {number} timeout - Segundos de espera (default: 3)
- * @returns {Promise<Array>} Lista de servidores encontrados
- */
-async function discoverMoviuServers(knownServerUrl, timeout = 3) {
-  try {
-    const response = await fetch(
-      `${knownServerUrl}/api/discover?timeout=${timeout}`,
-      {
-        method: 'GET',
-        // No requiere X-API-Key
-      }
-    );
-    
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-    
-    const data = await response.json();
-    return data.servers || [];
-  } catch (error) {
-    console.error('Error descubriendo servidores:', error);
-    return [];
-  }
-}
-
-// Ejemplo de uso
-async function main() {
-  // Si conoces al menos un servidor, puedes descubrir todos los demás
-  const servers = await discoverMoviuServers('https://192.168.1.100:8443');
-  
-  console.log(`Encontrados ${servers.length} servidor(es):`);
-  servers.forEach((server, i) => {
-    const addr = server.addresses?.[0] || 'unknown';
-    console.log(`  [${i + 1}] ${server.name}`);
-    console.log(`      URL: https://${addr}:${server.port}`);
-  });
-}
-
-main();
-```
-
-### Descubrimiento nativo con Node.js (usando multicast-dns)
-
-Para hacer descubrimiento mDNS real desde Node.js sin depender de un servidor conocido:
-
-```javascript
-const mdns = require('multicast-dns')();
-
-function discoverMoviuServersNative(timeout = 3000) {
-  return new Promise((resolve) => {
-    const servers = [];
-    
-    mdns.on('response', (response) => {
-      // Buscar servicios _moviu-print._tcp.local
-      const srvRecords = response.answers.filter(
-        (a) => a.type === 'SRV' && a.name.includes('_moviu-print._tcp')
-      );
-      
-      srvRecords.forEach((srv) => {
-        const aRecords = response.additionals.filter(
-          (a) => a.type === 'A' && a.name === srv.data.target
-        );
-        
-        servers.push({
-          name: srv.name,
-          port: srv.data.port,
-          host: srv.data.target,
-          addresses: aRecords.map((a) => a.data),
-        });
-      });
-    });
-    
-    // Enviar query mDNS
-    mdns.query({
-      questions: [{ name: '_moviu-print._tcp.local', type: 'PTR' }],
-    });
-    
-    setTimeout(() => {
-      mdns.destroy();
-      resolve(servers);
-    }, timeout);
-  });
-}
-
-// Uso
-discoverMoviuServersNative(3000).then((servers) => {
-  console.log('Servidores encontrados:', servers);
-});
-```
-
-**Dependencia npm:** `npm install multicast-dns`
+Distribuido bajo la [licencia MIT](LICENSE).

@@ -5,18 +5,19 @@
 - Servidor HTTPS local que expone una API REST para enviar trabajos de impresión.
 - Autenticación mediante `X-API-Key` en cabecera.
 - Endpoints principales: `POST /api/print`, `GET /api/health`, `GET /api/printers`, `GET /api/discover`.
-- Soporta modos: `html`, `image`, `pdf`, `pdf_system`, `raw`, `raw_text`, `zpl`.
+- Soporta modos: `html`, `image`, `pdf`, `raw`, `raw_text`, `hybrid`, `zpl`.
 
 ## Requisitos
 
-- La aplicación corre localmente (por defecto en `https://127.0.0.1:9050`).
+- La aplicación corre localmente (por defecto en `https://127.0.0.1:9000`).
 - El servidor genera una CA local (`ca_cert.pem`) y firma con ella el certificado HTTPS del servidor; instala esa CA en tablets/clientes para confiar en la conexión.
 - En entornos de desarrollo puedes usar `-k` en `curl` o `verify=False` en `requests` si aún no instalas la CA.
 - La API Key se persiste en el archivo de configuración (`~/.moviu_printer/config.json`).
 
 ## Autenticación
 
-- Todas las llamadas (excepto `/api/discover`) deben incluir el header `X-API-Key: <API_KEY>`.
+- Todas las llamadas a la API, excepto `/api/discover`, deben incluir el header `X-API-Key: <API_KEY>`.
+- El portal auxiliar `http://<host>:<puerto-api+1>/certificado` y su descarga de CA son públicos para permitir la instalación inicial. Nunca exponen claves privadas.
 - Si la API key es inválida la API devuelve `401 Unauthorized`.
 
 ---
@@ -35,8 +36,8 @@
 
 | Campo | Tipo | Descripción |
 |-------|------|-------------|
-| `mode` | string | `html` \| `image` \| `pdf` \| `raw` \| `raw_text` \| `zpl`. Default: `html` |
-| `content` | string | Payload del trabajo (HTML, base64, hex, texto, ZPL) |
+| `mode` | string | `html` \| `image` \| `pdf` \| `raw` \| `raw_text` \| `hybrid` \| `zpl`. Default: `html` |
+| `content` | string u object | Payload del trabajo; `hybrid` acepta un objeto con `image` y `commands` |
 | `printer` | PrinterSettings | Destino de impresión (opcional) |
 | `code_page` | string | Para `raw_text`: cp437, cp850, cp858, cp1252, etc. |
 | `dpi` | int | Para `pdf` con `printer.name`: resolución 72-600 (default: 150) |
@@ -54,11 +55,11 @@
 | `host` | string | Host de impresora (modos térmicos) |
 | `port` | int | Puerto de impresora (modos térmicos) |
 | `bytes` | int | Tamaño del payload |
-| `printer` | string | Nombre de impresora (pdf_system) |
-| `pages` | int | Páginas impresas (pdf_system) |
-| `paper_size` | string | Tamaño de hoja aplicado (pdf_system renderizado) |
-| `paper_width_mm` | float | Ancho personalizado aplicado en mm (pdf_system renderizado) |
-| `paper_height_mm` | float | Alto personalizado aplicado en mm (pdf_system renderizado) |
+| `printer` | string | Nombre de impresora local (modo `pdf`) |
+| `pages` | int | Páginas impresas (modo `pdf` local) |
+| `paper_size` | string | Tamaño de hoja aplicado (modo `pdf` renderizado) |
+| `paper_width_mm` | float | Ancho personalizado aplicado en mm |
+| `paper_height_mm` | float | Alto personalizado aplicado en mm |
 | `message` | string | Mensaje descriptivo |
 | `preview` | object | Datos de previsualización (si simulado) |
 
@@ -117,9 +118,9 @@ Descubrir servidores Moviu en la red local (mDNS). **No requiere autenticación.
   "servers": [
     {
       "name": "Moviu Print Server._moviu-print._tcp.local.",
-      "port": 9050,
+      "port": 9000,
       "addresses": ["192.168.1.156"],
-      "properties": {"version": "1.0", "protocol": "https"}
+      "properties": {"version": "1.1.0", "api_version": "1.0", "protocol": "https"}
     }
   ],
   "count": 1
@@ -250,6 +251,23 @@ Texto con secuencias de escape (`\n`, `\xHH`) codificado en la code page selecci
 
 **Code pages:** cp437, cp850, cp858, cp860, cp863, cp865, cp866, cp852, cp1252/latin-1
 
+### `hybrid` — Imagen seguida de comandos ESC/POS
+
+Combina una cabecera gráfica con comandos directos en un mismo trabajo, sin cortar el papel entre ambos bloques.
+
+```json
+{
+  "mode": "hybrid",
+  "content": {
+    "image": "iVBORw0KGgoAAAANSUhEUg...",
+    "commands": "G0BIZWxsbwoXVjA="
+  },
+  "printer": {"host": "192.168.1.50", "port": 9100}
+}
+```
+
+`image` y `commands` aceptan Base64 o hexadecimal. `content` también puede enviarse como una cadena JSON serializada.
+
 ### `zpl` — Impresoras de etiquetas Zebra
 
 Comandos ZPL enviados directamente.
@@ -269,7 +287,7 @@ Comandos ZPL enviados directamente.
 ### cURL - HTML
 
 ```bash
-curl -k -X POST "https://127.0.0.1:9050/api/print" \
+curl -k -X POST "https://127.0.0.1:9000/api/print" \
   -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"mode":"html","content":"<p>Prueba</p>"}'
@@ -278,10 +296,10 @@ curl -k -X POST "https://127.0.0.1:9050/api/print" \
 ### cURL - PDF a impresora láser
 
 ```bash
-curl -k -X POST "https://127.0.0.1:9050/api/print" \
+curl -k -X POST "https://127.0.0.1:9000/api/print" \
   -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"mode":"pdf_system","content":"JVBERi0x...","printer":{"name":"HP LaserJet Pro"},"dpi":300,"paper_width_mm":80,"paper_height_mm":200}'
+  -d '{"mode":"pdf","content":"JVBERi0x...","printer":{"name":"HP LaserJet Pro"},"dpi":300,"paper_width_mm":80,"paper_height_mm":200}'
 ```
 
 ### Python - requests
@@ -291,7 +309,7 @@ import requests
 import base64
 
 api_key = "YOUR_API_KEY"
-url = "https://127.0.0.1:9050/api/print"
+url = "https://127.0.0.1:9000/api/print"
 
 # HTML a térmica
 payload = {"mode": "html", "content": "<b>Hola</b>"}
@@ -303,7 +321,7 @@ with open("documento.pdf", "rb") as f:
     pdf_b64 = base64.b64encode(f.read()).decode()
 
 payload = {
-    "mode": "pdf_system",
+    "mode": "pdf",
     "content": pdf_b64,
     "printer": {"name": "HP LaserJet Pro"},
     "dpi": 300,
@@ -318,7 +336,7 @@ print(res.json())
 
 ```javascript
 const apiKey = 'YOUR_API_KEY';
-const url = 'https://192.168.1.100:9050/api/print';
+const url = 'https://192.168.1.100:9000/api/print';
 
 // HTML a térmica
 fetch(url, {
@@ -341,7 +359,7 @@ fetch(url, {
     'Content-Type': 'application/json'
   },
   body: JSON.stringify({
-    mode: 'pdf_system',
+    mode: 'pdf',
     content: pdfBase64,
     printer: { name: 'HP LaserJet Pro' },
     dpi: 300,

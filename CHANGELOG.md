@@ -2,6 +2,25 @@
 
 Todos los cambios notables en este proyecto serán documentados en este archivo.
 
+## [1.1.0] - 2026-08-07
+
+### Añadido
+- Portal local para instalar la CA de Moviu, con descarga segura, instrucciones por plataforma y huella SHA-256 verificable.
+- Configuración guiada del firewall para permitir solo las conexiones necesarias desde la red local en Windows, UFW y firewalld.
+- GitHub Pages con presentación del producto, descargas y documentación para usuarios y desarrolladores.
+- Compilación automatizada de ejecutables de Windows y Linux desde el tag de cada release.
+
+### Mejorado
+- Rediseño completo de la aplicación de escritorio con dashboard, navegación lateral, panel avanzado y vista de actividad.
+- Nuevo icono de marca para la ventana, la bandeja del sistema y los ejecutables empaquetados.
+- Inicio del servidor más confiable, con publicación mDNS únicamente después de confirmar que HTTPS está disponible.
+- Manejo seguro de eventos de interfaz, logs, actualizaciones y puente USB desde procesos en segundo plano.
+- Los cambios de configuración reinician el servicio activo para aplicarse inmediatamente y mantener correcta la URL mostrada.
+
+### Corregido
+- Los errores de inicio y ejecución de Uvicorn ahora llegan al registro de actividad de la aplicación.
+- Las reglas de firewall administradas por Moviu pueden retirarse; las reglas de apertura solo se crean cuando UFW está activo.
+
 ## [1.0.5] - 2026-07-09
 
 ### Corregido

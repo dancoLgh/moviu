@@ -4,34 +4,47 @@ from __future__ import annotations
 
 import logging
 import os
+from queue import Empty, Full, Queue, SimpleQueue
 import re
 import signal
 import subprocess
 import socket
 import sys
 import threading
+import time
 import tkinter as tk
+import webbrowser
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from typing import Callable
 
 import pystray
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageTk
 
 import uvicorn
 
 from .autostart import configure_autostart
 from .certs import (
     ca_certificate_path,
+    certificate_sha256_fingerprint,
     certificates_folder,
     ensure_certificates,
     export_ca_certificate,
     install_certificate_in_system,
 )
 from .config import AppConfig, CONFIG_DIR, load_config, save_config, VERSION
-from .server import create_api
+from .server import certificate_http_port, create_api, create_certificate_api
 from .usb_bridge import UsbBridgeController, discover_printers
-from .mdns import MoviuServiceAnnouncer, get_local_ip
+from .mdns import MoviuServiceAnnouncer, get_local_ip, get_local_ips
+from .network_access import (
+    NetworkAccessError,
+    close_local_network_ports,
+    is_local_network_bind,
+    open_local_network_ports,
+)
+from .logging_config import build_uvicorn_log_config
+from .resources import APP_ICON_ICO_PATH, load_app_icon
+from .ui_state import ActivityFeed, NAV_ITEMS
 from .updater import check_for_updates, open_release_page
 
 
@@ -64,6 +77,13 @@ def _suppress_windows_connection_reset_noise() -> None:
     transport_cls._moviu_connection_reset_patch = True
 
 
+def _certificate_hosts(config: AppConfig) -> list[str]:
+    hosts = ["localhost", "127.0.0.1", *get_local_ips()]
+    if config.host not in ("0.0.0.0", "127.0.0.1", "localhost"):
+        hosts.append(config.host)
+    return hosts
+
+
 class ServerController:
     """Manage the uvicorn server on a background thread."""
 
@@ -71,17 +91,18 @@ class ServerController:
         self.config = config
         self.server: uvicorn.Server | None = None
         self.thread: threading.Thread | None = None
+        self.certificate_server: uvicorn.Server | None = None
+        self.certificate_thread: threading.Thread | None = None
         self.mdns_announcer: MoviuServiceAnnouncer | None = None
 
     def start(self) -> None:
-        if self.server and self.server.started:
+        if self.thread and self.thread.is_alive():
             return
         _ensure_streams()
         _suppress_windows_connection_reset_noise()
+        portal_port = certificate_http_port(self.config.port)
         # Generate certificate for localhost, internal IP and configured host
-        cert_hosts = ["localhost", "127.0.0.1", get_local_ip()]
-        if self.config.host not in ("0.0.0.0", "127.0.0.1", "localhost"):
-            cert_hosts.append(self.config.host)
+        cert_hosts = _certificate_hosts(self.config)
             
         cert_path, key_path = ensure_certificates(
             Path(self.config.ssl_cert_path), Path(self.config.ssl_key_path), cert_hosts
@@ -96,19 +117,43 @@ class ServerController:
             ssl_certfile=str(cert_path),
             ssl_keyfile=str(key_path),
         )
+        certificate_config = uvicorn.Config(
+            create_certificate_api(self.config),
+            host=self.config.host,
+            port=portal_port,
+            log_level="info",
+            log_config=self._log_config(),
+        )
         self.server = uvicorn.Server(uvicorn_config)
+        self.certificate_server = uvicorn.Server(certificate_config)
         self.thread = threading.Thread(target=self.server.run, daemon=True)
-        self.thread.start()
+        self.certificate_thread = threading.Thread(
+            target=self.certificate_server.run,
+            daemon=True,
+        )
+        try:
+            self.thread.start()
+            self.certificate_thread.start()
+        except Exception:
+            self.stop()
+            raise
 
-        # Start mDNS announcement
+    def announce_mdns(self) -> None:
+        if self.mdns_announcer or not self.server or not self.server.started:
+            return
         self.mdns_announcer = MoviuServiceAnnouncer(
             port=self.config.port,
             instance_name="Moviu Print Server",
-            properties={"api_version": "1.0", "protocol": "https"},
+            properties={
+                "version": VERSION,
+                "api_version": "1.0",
+                "protocol": "https",
+                "certificate_http_port": certificate_http_port(self.config.port),
+            },
         )
         self.mdns_announcer.start()
 
-    def stop(self) -> None:
+    def stop(self) -> bool:
         # Stop mDNS announcement
         if self.mdns_announcer:
             self.mdns_announcer.stop()
@@ -116,65 +161,34 @@ class ServerController:
 
         if self.server:
             self.server.should_exit = True
-        if self.thread and self.thread.is_alive():
-            self.thread.join(timeout=2)
+        if self.certificate_server:
+            self.certificate_server.should_exit = True
+        server_threads = (
+            (self.server, self.thread),
+            (self.certificate_server, self.certificate_thread),
+        )
+        for _server, thread in server_threads:
+            if thread and thread.is_alive():
+                thread.join(timeout=2)
+        for server, thread in server_threads:
+            if server and thread and thread.is_alive():
+                server.force_exit = True
+                thread.join(timeout=3)
+        if any(thread and thread.is_alive() for _server, thread in server_threads):
+            logging.error("Uno de los servicios de Moviu no respondió al apagado")
+            return False
         self.server = None
         self.thread = None
+        self.certificate_server = None
+        self.certificate_thread = None
+        return True
 
     def _log_config(self) -> dict:
         log_file = certificates_folder() / "app.log"
         stream = sys.stdout or sys.__stdout__
         if stream is None:
             stream = open(os.devnull, "w", encoding="utf-8")
-
-        return {
-            "version": 1,
-            "disable_existing_loggers": False,
-            "formatters": {
-                "default": {
-                    "()": "logging.Formatter",
-                    "fmt": "%(asctime)s [%(levelname)s] %(message)s",
-                    "datefmt": "%Y-%m-%d %H:%M:%S",
-                },
-                "access": {
-                    "()": "logging.Formatter",
-                    "fmt": "%(asctime)s [%(levelname)s] %(client_addr)s - \"%(request_line)s\" %(status_code)s",
-                    "datefmt": "%Y-%m-%d %H:%M:%S",
-                },
-            },
-            "handlers": {
-                "default": {
-                    "formatter": "default",
-                    "class": "logging.StreamHandler",
-                    "stream": stream,
-                },
-                "file": {
-                    "formatter": "default",
-                    "class": "logging.FileHandler",
-                    "filename": str(log_file),
-                    "mode": "a",
-                    "encoding": "utf-8",
-                },
-                "access": {
-                    "formatter": "access",
-                    "class": "logging.StreamHandler",
-                    "stream": stream,
-                },
-            },
-            "loggers": {
-                "uvicorn": {"handlers": ["default", "file"], "level": "INFO", "propagate": False},
-                "uvicorn.error": {
-                    "handlers": ["default", "file"],
-                    "level": "INFO",
-                    "propagate": False,
-                },
-                "uvicorn.access": {
-                    "handlers": ["access", "file"],
-                    "level": "INFO",
-                    "propagate": False,
-                },
-            },
-        }
+        return build_uvicorn_log_config(log_file, stream)
 
 
 class DesktopApp:
@@ -183,22 +197,38 @@ class DesktopApp:
         self.root.title("Moviu Print Server")
         self.config = load_config()
         self.controller = ServerController(self.config)
+        self.bridge_status_queue: SimpleQueue[str] = SimpleQueue()
         self.bridge_controller = UsbBridgeController(on_status=self._update_bridge_status)
+        self.activity_feed = ActivityFeed()
+        self.ui_callback_queue: SimpleQueue[Callable[[], None]] = SimpleQueue()
+        self._closing = False
+        self._server_start_token: object | None = None
         _ensure_streams()
         self._setup_logging()
+        self._set_window_icon()
         self._setup_theme()
         self._build_ui()
         self._maximize_window()
         self._configure_window_hooks()
         self._register_signal_handlers()
         self.tray = SystemTray(
-            on_show=self._restore_from_tray,
-            on_exit=lambda: self.root.after(0, self._do_exit),
+            on_show=lambda: self._queue_ui_callback(self._restore_from_tray),
+            on_exit=lambda: self._queue_ui_callback(self._do_exit),
         )
         self._check_single_instance()
         self._apply_autostart(self.config.auto_start, notify=False)
         self._maybe_autostart_server()
         self._maybe_autostart_bridge()
+
+    def _set_window_icon(self) -> None:
+        """Apply the branded icon to the Tk window and Windows taskbar."""
+        try:
+            self._window_icon = ImageTk.PhotoImage(load_app_icon(256), master=self.root)
+            self.root.iconphoto(True, self._window_icon)
+            if sys.platform.startswith("win"):
+                self.root.iconbitmap(default=str(APP_ICON_ICO_PATH))
+        except (OSError, tk.TclError):
+            logging.exception("No se pudo cargar el icono de Moviu Print Server")
 
     def _check_single_instance(self) -> None:
         """Prevent multiple instances and bring the existing one to focus."""
@@ -217,7 +247,7 @@ class DesktopApp:
                         conn, _ = self.instance_socket.accept()
                         data = conn.recv(1024).decode('utf-8')
                         if data == "SHOW":
-                            self._restore_from_tray()
+                            self._queue_ui_callback(self._restore_from_tray)
                         conn.close()
                     except Exception:
                         break
@@ -262,175 +292,671 @@ class DesktopApp:
         self.bridge_status_var = tk.StringVar(value="Puente detenido")
         self.github_token_var = tk.StringVar(value=self.config.github_token)
         self.available_printers: list[str] = []
-
-        # Main Scrollable Container (for smaller screens)
-        main_container = ttk.Frame(self.root, style="Card.TFrame")
-        main_container.pack(fill=tk.BOTH, expand=True)
-
-        header = ttk.Frame(main_container, padding=(20, 20, 20, 10), style="Card.TFrame")
-        header.pack(fill=tk.X)
-        ttk.Label(header, text="Moviu Print Server", style="Headline.TLabel").pack(side=tk.LEFT)
-        ttk.Label(header, text=VERSION, style="Subhead.TLabel").pack(side=tk.LEFT, padx=10, pady=(5, 0))
-
-        self.update_link_var = tk.StringVar(value="")
-        self.update_label = ttk.Label(header, textvariable=self.update_link_var, cursor="hand2", foreground="#38bdf8", font=("Segoe UI Bold", 9))
-        self.update_label.pack(side=tk.LEFT, padx=5, pady=(5, 0))
-        self.update_label.bind("<Button-1>", lambda e: self._on_update_click())
-
-        # Dashboard (Aesthetic Status)
-        dashboard = ttk.Frame(main_container, padding=20, style="Card.TFrame")
-        dashboard.pack(fill=tk.X)
-        
-        status_card = ttk.Frame(dashboard, padding=30, style="CardInner.TFrame", relief="flat")
-        status_card.pack(fill=tk.X)
-        
-        self.status_title_var = tk.StringVar(value="SERVIDOR APAGADO")
-        self.status_desc_var = tk.StringVar(value="La impresora no recibirá trabajos hasta que inicies el servidor.")
-        self.status_label = ttk.Label(status_card, textvariable=self.status_title_var, style="StatusStopped.TLabel")
-        self.status_label.pack()
-        
-        ttk.Label(status_card, textvariable=self.status_desc_var, style="Subhead.TLabel").pack(pady=(5, 15))
-        
-        btn_center = ttk.Frame(status_card, style="CardInner.TFrame")
-        btn_center.pack()
-        self.main_action_btn = ttk.Button(btn_center, text="INICIAR SERVIDOR", style="Big.TButton", command=self.start_server)
-        self.main_action_btn.pack(side=tk.LEFT, padx=10)
-        self.stop_btn = ttk.Button(btn_center, text="DETENER", style="Big.TButton", command=self.stop_server, state="disabled")
-        self.stop_btn.pack(side=tk.LEFT, padx=10)
-        ttk.Button(btn_center, text="NOVEDADES", style="Big.TButton", command=self._show_changelog).pack(side=tk.LEFT, padx=10)
-
-        # Tabs for Advanced Settings
-        self.notebook = ttk.Notebook(main_container)
-        self.notebook.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
-
-        # Tab 1: Info & API
-        info_tab = ttk.Frame(self.notebook, padding=20)
-        self.notebook.add(info_tab, text=" Información ")
-        
-        info_grid = ttk.Frame(info_tab, style="CardInner.TFrame")
-        info_grid.pack(fill=tk.X)
-        info_grid.columnconfigure(1, weight=1)
-
         display_host = self.config.host if self.config.host != "0.0.0.0" else get_local_ip()
         self.full_url_var = tk.StringVar(value=f"https://{display_host}:{self.config.port}")
-        ttk.Label(info_grid, text="URL del Servidor:", font=("Segoe UI Bold", 10)).grid(row=0, column=0, sticky="w", pady=5)
-        ttk.Entry(info_grid, textvariable=self.full_url_var, state="readonly").grid(row=0, column=1, sticky="ew", padx=10)
-        
-        ttk.Label(info_grid, text="API Key:", font=("Segoe UI Bold", 10)).grid(row=1, column=0, sticky="w", pady=5)
-        ttk.Entry(info_grid, textvariable=self.api_key_var, state="readonly").grid(row=1, column=1, sticky="ew", padx=10)
-        
-        api_btns = ttk.Frame(info_tab, style="CardInner.TFrame")
-        api_btns.pack(fill=tk.X, pady=10)
-        ttk.Button(api_btns, text="Copiar API Key", command=self._copy_api_key).pack(side=tk.LEFT, padx=5)
-        ttk.Button(api_btns, text="Regenerar API Key", command=self.regenerate_api_key).pack(side=tk.LEFT, padx=5)
-        ttk.Button(api_btns, text="Buscar Actualizaciones", command=self._manual_update_check).pack(side=tk.LEFT, padx=5)
 
-        # Tab 2: Configuración de Impresora
-        config_tab = ttk.Frame(self.notebook, padding=20)
-        self.notebook.add(config_tab, text=" Configuración ")
-        
-        conf_grid = ttk.Frame(config_tab, style="CardInner.TFrame")
-        conf_grid.pack(fill=tk.X)
-        conf_grid.columnconfigure(1, weight=1)
+        self.root.minsize(1050, 680)
+        self.root.rowconfigure(0, weight=1)
+        self.root.columnconfigure(0, weight=1)
 
-        ttk.Label(conf_grid, text="Host Impresora").grid(row=0, column=0, sticky="w", pady=5)
-        ttk.Entry(conf_grid, textvariable=self.printer_host_var).grid(row=0, column=1, sticky="ew", padx=10)
-        
-        ttk.Label(conf_grid, text="Puerto Impresora").grid(row=1, column=0, sticky="w", pady=5)
-        ttk.Entry(conf_grid, textvariable=self.printer_port_var).grid(row=1, column=1, sticky="ew", padx=10)
+        shell = ttk.Frame(self.root, style="App.TFrame")
+        shell.grid(row=0, column=0, sticky="nsew")
+        self.layout_shell = shell
+        shell.rowconfigure(0, weight=1)
+        shell.columnconfigure(1, weight=1)
+        shell.columnconfigure(2, minsize=310)
 
-        ttk.Label(conf_grid, text="Ancho de Papel").grid(row=2, column=0, sticky="w", pady=5)
-        self.width_combo = ttk.Combobox(conf_grid, textvariable=self.printer_width_var, values=["576 (80mm)", "384 (58mm)"], state="readonly")
-        self.width_combo.grid(row=2, column=1, sticky="ew", padx=10)
+        sidebar = ttk.Frame(shell, style="Sidebar.TFrame", width=172, padding=(12, 18))
+        sidebar.grid(row=0, column=0, sticky="ns")
+        sidebar.grid_propagate(False)
+        sidebar.rowconfigure(2, weight=1)
 
-        ttk.Label(conf_grid, text="Oscuridad (Densidad)").grid(row=3, column=0, sticky="w", pady=5)
-        ttk.Scale(conf_grid, variable=self.printer_gamma_var, from_=200, to=1000, orient=tk.HORIZONTAL).grid(row=3, column=1, sticky="ew", padx=10)
-        ttk.Label(conf_grid, textvariable=self.printer_gamma_str, width=4).grid(row=3, column=2, sticky="w")
+        brand = ttk.Frame(sidebar, style="Sidebar.TFrame")
+        brand.grid(row=0, column=0, sticky="ew", pady=(0, 24))
+        self._brand_icon = ImageTk.PhotoImage(load_app_icon(38), master=self.root)
+        ttk.Label(brand, image=self._brand_icon, style="Sidebar.TLabel").pack(side=tk.LEFT)
+        brand_text = ttk.Frame(brand, style="Sidebar.TFrame")
+        brand_text.pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Label(brand_text, text="moviu", style="Brand.TLabel").pack(anchor="w")
+        ttk.Label(brand_text, text=f"Print Server  {VERSION}", style="BrandMeta.TLabel").pack(anchor="w")
 
-        config_check_frame = ttk.Frame(config_tab, style="CardInner.TFrame")
-        config_check_frame.pack(fill=tk.X, pady=10)
-        ttk.Checkbutton(config_check_frame, text="Simular impresora (modo prueba)", variable=self.simulate_var).pack(anchor="w")
-        ttk.Checkbutton(config_check_frame, text="Ejecutar al iniciar Windows", variable=self.auto_start_var).pack(anchor="w")
+        ttk.Label(sidebar, text="NAVEGACIÓN", style="NavSection.TLabel").grid(
+            row=1, column=0, sticky="w", padx=8, pady=(0, 8)
+        )
+        nav_frame = ttk.Frame(sidebar, style="Sidebar.TFrame")
+        nav_frame.grid(row=2, column=0, sticky="nsew")
+        self.nav_buttons: dict[str, ttk.Button] = {}
+        for destination, label in NAV_ITEMS:
+            button = ttk.Button(
+                nav_frame,
+                text=label,
+                style="Nav.TButton",
+                command=lambda page=destination: self._show_page(page),
+            )
+            button.pack(fill=tk.X, pady=3)
+            self.nav_buttons[destination] = button
 
-        ttk.Button(config_tab, text="Guardar Cambios", style="Action.TButton", command=self.save_settings).pack(pady=10)
+        ttk.Separator(sidebar).grid(row=3, column=0, sticky="ew", pady=12)
+        ttk.Button(
+            sidebar,
+            text="Ayuda y novedades",
+            style="Nav.TButton",
+            command=self._show_changelog,
+        ).grid(row=4, column=0, sticky="ew")
 
-        # Tab 3: Puente USB
-        bridge_tab = ttk.Frame(self.notebook, padding=20)
-        self.notebook.add(bridge_tab, text=" Puente USB ")
-        
-        ttk.Checkbutton(bridge_tab, text="Habilitar puente TCP → USB", variable=self.bridge_enabled_var).pack(anchor="w", pady=5)
-        
-        bridge_grid = ttk.Frame(bridge_tab, style="CardInner.TFrame")
-        bridge_grid.pack(fill=tk.X, pady=10)
-        bridge_grid.columnconfigure(1, weight=1)
+        center = ttk.Frame(shell, style="App.TFrame")
+        center.grid(row=0, column=1, sticky="nsew")
+        center.rowconfigure(1, weight=1)
+        center.columnconfigure(0, weight=1)
 
-        ttk.Label(bridge_grid, text="Impresora USB").grid(row=0, column=0, sticky="w", pady=5)
-        self.printer_combo = ttk.Combobox(bridge_grid, textvariable=self.bridge_printer_var, state="readonly")
-        self.printer_combo.grid(row=0, column=1, sticky="ew", padx=10)
-        ttk.Button(bridge_grid, text="Actualizar", command=self.refresh_printers).grid(row=0, column=2)
+        topbar = ttk.Frame(center, style="Topbar.TFrame", padding=(20, 12))
+        topbar.grid(row=0, column=0, sticky="ew")
+        topbar.columnconfigure(1, weight=1)
+        self.page_title_var = tk.StringVar(value="Inicio")
+        ttk.Label(topbar, textvariable=self.page_title_var, style="PageTitle.TLabel").grid(
+            row=0, column=0, sticky="w"
+        )
+        self.update_link_var = tk.StringVar(value="")
+        self.update_label = ttk.Label(
+            topbar,
+            textvariable=self.update_link_var,
+            cursor="hand2",
+            style="Update.TLabel",
+        )
+        self.update_label.grid(row=0, column=1, sticky="e", padx=14)
+        self.update_label.bind("<Button-1>", lambda _event: self._on_update_click())
+        self.advanced_toggle_btn = ttk.Button(
+            topbar,
+            text="Ocultar panel",
+            style="Secondary.TButton",
+            command=self._toggle_advanced_panel,
+        )
+        self.advanced_toggle_btn.grid(row=0, column=2, sticky="e")
 
-        ttk.Label(bridge_grid, text="Puerto TCP").grid(row=1, column=0, sticky="w", pady=5)
-        ttk.Entry(bridge_grid, textvariable=self.bridge_port_var).grid(row=1, column=1, sticky="ew", padx=10)
+        page_host = ttk.Frame(center, style="Page.TFrame", padding=18)
+        page_host.grid(row=1, column=0, sticky="nsew")
+        page_host.rowconfigure(0, weight=1)
+        page_host.columnconfigure(0, weight=1)
+        self.pages: dict[str, ttk.Frame] = {}
+        for destination, _label in NAV_ITEMS:
+            page = ttk.Frame(page_host, style="Page.TFrame")
+            page.grid(row=0, column=0, sticky="nsew")
+            self.pages[destination] = page
 
-        ttk.Checkbutton(bridge_tab, text="Arrancar puente automáticamente", variable=self.bridge_autostart_var).pack(anchor="w")
+        self._build_home_page(self.pages["home"])
+        self._build_printers_page(self.pages["printers"])
+        self._build_connection_page(self.pages["connection"])
+        self._build_activity_page(self.pages["activity"])
+        self._build_settings_page(self.pages["settings"])
 
-        b_btns = ttk.Frame(bridge_tab, style="CardInner.TFrame")
-        b_btns.pack(pady=15)
-        ttk.Button(b_btns, text="Iniciar Puente", command=self.start_bridge).pack(side=tk.LEFT, padx=5)
-        ttk.Button(b_btns, text="Detener Puente", command=self.stop_bridge).pack(side=tk.LEFT, padx=5)
-        
-        ttk.Label(bridge_tab, textvariable=self.bridge_status_var, style="Status.TLabel").pack()
+        self.advanced_panel = ttk.Frame(
+            shell,
+            style="Advanced.TFrame",
+            width=310,
+            padding=(14, 16),
+        )
+        self.advanced_panel.grid(row=0, column=2, sticky="nsew")
+        self._build_advanced_panel(self.advanced_panel)
+        self.advanced_panel_visible = True
 
-        # Tab 4: Avanzado (SSL & Tools)
-        advanced_tab = ttk.Frame(self.notebook, padding=20)
-        self.notebook.add(advanced_tab, text=" Avanzado ")
-        
-        adv_grid = ttk.Frame(advanced_tab, style="CardInner.TFrame")
-        adv_grid.pack(fill=tk.X)
-        adv_grid.columnconfigure(1, weight=1)
+        self._show_page("home")
 
-        ttk.Label(adv_grid, text="Host API").grid(row=0, column=0, sticky="w", pady=5)
-        ttk.Entry(adv_grid, textvariable=self.host_var).grid(row=0, column=1, sticky="ew", padx=10)
-        
-        ttk.Label(adv_grid, text="Puerto API").grid(row=1, column=0, sticky="w", pady=5)
-        ttk.Entry(adv_grid, textvariable=self.port_var).grid(row=1, column=1, sticky="ew", padx=10)
+        self.refresh_printers(initial=True)
+        self._refresh_activity_summary()
+        self._poll_background_events()
+        self.root.after(3000, self._background_update_check)
 
-        ttk.Label(adv_grid, text="GitHub Token (Private)").grid(row=2, column=0, sticky="w", pady=5)
-        ttk.Entry(adv_grid, textvariable=self.github_token_var, show="*").grid(row=2, column=1, sticky="ew", padx=10)
+    def _build_home_page(self, page: ttk.Frame) -> None:
+        for column in (0, 1):
+            page.columnconfigure(column, weight=1)
+        page.rowconfigure(2, weight=1)
 
-        tools_frame = ttk.LabelFrame(advanced_tab, text="Herramientas", padding=10)
-        tools_frame.pack(fill=tk.X, pady=20)
-        
-        for text, cmd in [
-            ("Generar Certificados SSL", self.generate_certs),
-            ("Instalar Certificado en Windows (esta PC)", self.install_cert_locally),
-            ("Exportar Certificado CA (.crt)", self.export_cert),
-            ("Abrir Carpeta de Simulaciones", self.open_simulations),
-        ]:
-            ttk.Button(tools_frame, text=text, command=cmd).pack(fill=tk.X, pady=2)
-
-        # Tab 5: Logs
-        log_tab = ttk.Frame(self.notebook, padding=5)
-        self.notebook.add(log_tab, text=" Logs ")
-        
-        self.log_widget = tk.Text(
-            log_tab,
-            height=15,
+        hero = self._card(page, padding=(22, 18))
+        hero.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 12))
+        hero.columnconfigure(0, weight=1)
+        self.status_title_var = tk.StringVar(value="Servidor listo para iniciar")
+        self.status_desc_var = tk.StringVar(
+            value="Inicia el servicio para recibir trabajos de impresión desde la red."
+        )
+        self.status_label = ttk.Label(hero, textvariable=self.status_title_var, style="HeroTitle.TLabel")
+        self.status_label.grid(row=0, column=0, sticky="w")
+        ttk.Label(hero, textvariable=self.status_desc_var, style="Muted.TLabel").grid(
+            row=1, column=0, sticky="w", pady=(4, 14)
+        )
+        actions = ttk.Frame(hero, style="Surface.TFrame")
+        actions.grid(row=2, column=0, sticky="w")
+        self.main_action_btn = ttk.Button(
+            actions,
+            text="Iniciar servidor",
+            style="Primary.TButton",
+            command=self.start_server,
+        )
+        self.main_action_btn.pack(side=tk.LEFT)
+        self.stop_btn = ttk.Button(
+            actions,
+            text="Detener",
+            style="Secondary.TButton",
+            command=self.stop_server,
             state="disabled",
-            bg="#0b1220",
-            fg="#94a3b8",
-            insertbackground="#e2e8f0",
+        )
+        self.stop_btn.pack(side=tk.LEFT, padx=(8, 0))
+        self.server_badge_var = tk.StringVar(value="Servidor detenido")
+        self.server_badge_label = ttk.Label(
+            hero,
+            textvariable=self.server_badge_var,
+            style="DangerBadge.TLabel",
+            padding=(10, 6),
+        )
+        self.server_badge_label.grid(row=0, column=1, rowspan=3, sticky="ne", padx=(18, 0))
+
+        printer_card = self._card(page)
+        printer_card.grid(row=1, column=0, sticky="nsew", padx=(0, 6), pady=(0, 12))
+        ttk.Label(printer_card, text="Impresora predeterminada", style="CardTitle.TLabel").pack(anchor="w")
+        ttk.Label(printer_card, textvariable=self.printer_host_var, style="Metric.TLabel").pack(
+            anchor="w", pady=(12, 2)
+        )
+        ttk.Label(printer_card, text="Impresora de red configurada", style="InfoBadge.TLabel").pack(anchor="w")
+        printer_meta = ttk.Frame(printer_card, style="Surface.TFrame")
+        printer_meta.pack(fill=tk.X, pady=(16, 10))
+        ttk.Label(printer_meta, text="Puerto", style="Muted.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(printer_meta, textvariable=self.printer_port_var, style="BodyStrong.TLabel").grid(
+            row=1, column=0, sticky="w"
+        )
+        ttk.Label(printer_meta, text="Ancho", style="Muted.TLabel").grid(
+            row=0, column=1, sticky="w", padx=(36, 0)
+        )
+        ttk.Label(printer_meta, textvariable=self.printer_width_var, style="BodyStrong.TLabel").grid(
+            row=1, column=1, sticky="w", padx=(36, 0)
+        )
+        ttk.Button(
+            printer_card,
+            text="Configurar impresora",
+            style="Outline.TButton",
+            command=lambda: self._show_page("printers"),
+        ).pack(fill=tk.X, side=tk.BOTTOM)
+
+        connection_card = self._card(page)
+        connection_card.grid(row=1, column=1, sticky="nsew", padx=(6, 0), pady=(0, 12))
+        ttk.Label(connection_card, text="Conexión web", style="CardTitle.TLabel").pack(anchor="w")
+        ttk.Label(connection_card, text="HTTPS configurado", style="SuccessBadge.TLabel").pack(
+            anchor="w", pady=(12, 10)
+        )
+        ttk.Entry(connection_card, textvariable=self.full_url_var, state="readonly").pack(fill=tk.X)
+        ttk.Label(
+            connection_card,
+            text="Las páginas autorizadas pueden enviar trabajos con la API key.",
+            style="Muted.TLabel",
+            wraplength=340,
+        ).pack(anchor="w", pady=(14, 10))
+        ttk.Label(connection_card, textvariable=self.bridge_status_var, style="Status.TLabel").pack(
+            anchor="w", side=tk.BOTTOM
+        )
+
+        activity_card = self._card(page, padding=(16, 12))
+        activity_card.grid(row=2, column=0, columnspan=2, sticky="nsew")
+        activity_card.columnconfigure(0, weight=1)
+        ttk.Label(activity_card, text="Actividad reciente", style="CardTitle.TLabel").grid(
+            row=0, column=0, sticky="w", pady=(0, 8)
+        )
+        ttk.Button(
+            activity_card,
+            text="Ver toda la actividad",
+            style="Link.TButton",
+            command=lambda: self._show_page("activity"),
+        ).grid(row=0, column=1, sticky="e")
+        self.activity_message_vars: list[tk.StringVar] = []
+        self.activity_time_vars: list[tk.StringVar] = []
+        self.activity_dots: list[ttk.Label] = []
+        for row_index in range(4):
+            row = ttk.Frame(activity_card, style="ActivityRow.TFrame", padding=(10, 7))
+            row.grid(row=row_index + 1, column=0, columnspan=2, sticky="ew", pady=2)
+            row.columnconfigure(1, weight=1)
+            dot = ttk.Label(row, text="o", style="InfoDot.TLabel")
+            dot.grid(row=0, column=0, padx=(0, 9))
+            message_var = tk.StringVar(value="Sin actividad reciente" if row_index == 0 else "")
+            time_var = tk.StringVar(value="")
+            ttk.Label(row, textvariable=message_var, style="Activity.TLabel").grid(
+                row=0, column=1, sticky="w"
+            )
+            ttk.Label(row, textvariable=time_var, style="Muted.TLabel").grid(
+                row=0, column=2, sticky="e", padx=(12, 0)
+            )
+            self.activity_dots.append(dot)
+            self.activity_message_vars.append(message_var)
+            self.activity_time_vars.append(time_var)
+
+    def _build_printers_page(self, page: ttk.Frame) -> None:
+        for column in (0, 1):
+            page.columnconfigure(column, weight=1)
+        network = self._card(page)
+        network.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+        network.columnconfigure(1, weight=1)
+        ttk.Label(network, text="Impresora de red", style="CardTitle.TLabel").grid(
+            row=0, column=0, columnspan=2, sticky="w", pady=(0, 14)
+        )
+        self._labeled_entry(network, 1, "Host o dirección IP", self.printer_host_var)
+        self._labeled_entry(network, 2, "Puerto", self.printer_port_var)
+
+        rendering = self._card(page)
+        rendering.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+        rendering.columnconfigure(1, weight=1)
+        ttk.Label(rendering, text="Papel y renderizado", style="CardTitle.TLabel").grid(
+            row=0, column=0, columnspan=3, sticky="w", pady=(0, 14)
+        )
+        ttk.Label(rendering, text="Ancho de papel", style="FieldLabel.TLabel").grid(
+            row=1, column=0, sticky="w", pady=7
+        )
+        self.width_combo = ttk.Combobox(
+            rendering,
+            textvariable=self.printer_width_var,
+            values=["576 (80mm)", "384 (58mm)"],
+            state="readonly",
+        )
+        self.width_combo.grid(row=1, column=1, columnspan=2, sticky="ew", padx=(14, 0), pady=7)
+        ttk.Label(rendering, text="Oscuridad", style="FieldLabel.TLabel").grid(
+            row=2, column=0, sticky="w", pady=7
+        )
+        ttk.Scale(
+            rendering,
+            variable=self.printer_gamma_var,
+            from_=200,
+            to=1000,
+            orient=tk.HORIZONTAL,
+        ).grid(row=2, column=1, sticky="ew", padx=(14, 8), pady=7)
+        ttk.Label(rendering, textvariable=self.printer_gamma_str, width=4).grid(
+            row=2, column=2, sticky="e"
+        )
+        ttk.Checkbutton(
+            rendering,
+            text="Simular impresora y guardar trabajos localmente",
+            variable=self.simulate_var,
+        ).grid(row=3, column=0, columnspan=3, sticky="w", pady=(14, 4))
+
+        footer = self._card(page, padding=(16, 12))
+        footer.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+        ttk.Label(
+            footer,
+            text="Si el servidor está activo, se reiniciará para aplicar los cambios.",
+            style="Muted.TLabel",
+        ).pack(side=tk.LEFT)
+        ttk.Button(
+            footer,
+            text="Guardar cambios",
+            style="Primary.TButton",
+            command=self.save_settings,
+        ).pack(side=tk.RIGHT)
+
+    def _build_connection_page(self, page: ttk.Frame) -> None:
+        for column in (0, 1):
+            page.columnconfigure(column, weight=1)
+        api_card = self._card(page)
+        api_card.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+        ttk.Label(api_card, text="Acceso a la API", style="CardTitle.TLabel").pack(anchor="w")
+        ttk.Label(api_card, text="URL HTTPS", style="FieldLabel.TLabel").pack(anchor="w", pady=(16, 6))
+        ttk.Entry(api_card, textvariable=self.full_url_var, state="readonly").pack(fill=tk.X)
+        ttk.Label(api_card, text="API key", style="FieldLabel.TLabel").pack(anchor="w", pady=(14, 6))
+        ttk.Entry(api_card, textvariable=self.api_key_var, state="readonly").pack(fill=tk.X)
+        api_actions = ttk.Frame(api_card, style="Surface.TFrame")
+        api_actions.pack(fill=tk.X, pady=(12, 0))
+        ttk.Button(api_actions, text="Copiar API key", command=self._copy_api_key).pack(side=tk.LEFT)
+        ttk.Button(api_actions, text="Regenerar", command=self.regenerate_api_key).pack(
+            side=tk.LEFT, padx=(8, 0)
+        )
+
+        cert_card = self._card(page)
+        cert_card.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+        cert_card.columnconfigure(1, weight=1)
+        ttk.Label(cert_card, text="Red y certificados", style="CardTitle.TLabel").grid(
+            row=0, column=0, columnspan=2, sticky="w", pady=(0, 14)
+        )
+        self._labeled_entry(cert_card, 1, "Host API", self.host_var)
+        self._labeled_entry(cert_card, 2, "Puerto API", self.port_var)
+        for row_index, (label, command) in enumerate(
+            [
+                ("Generar certificados SSL", self.generate_certs),
+                ("Instalar certificado en Windows", self.install_cert_locally),
+                ("Exportar certificado CA", self.export_cert),
+                ("Abrir portal de instalación", self.open_certificate_portal),
+                ("Habilitar acceso en la red local", self.enable_local_network_access),
+                ("Retirar acceso del firewall", self.disable_local_network_access),
+            ],
+            start=3,
+        ):
+            ttk.Button(cert_card, text=label, style="Outline.TButton", command=command).grid(
+                row=row_index, column=0, columnspan=2, sticky="ew", pady=(8 if row_index == 3 else 3, 0)
+            )
+        ttk.Button(
+            cert_card,
+            text="Guardar red",
+            style="Primary.TButton",
+            command=self.save_settings,
+        ).grid(row=8, column=0, columnspan=2, sticky="ew", pady=(14, 0))
+
+    def _build_activity_page(self, page: ttk.Frame) -> None:
+        page.rowconfigure(1, weight=1)
+        page.columnconfigure(0, weight=1)
+        toolbar = self._card(page, padding=(14, 10))
+        toolbar.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        ttk.Label(toolbar, text="Registro en tiempo real", style="CardTitle.TLabel").pack(side=tk.LEFT)
+        ttk.Button(toolbar, text="Abrir simulaciones", command=self.open_simulations).pack(side=tk.RIGHT)
+        ttk.Button(toolbar, text="Limpiar vista", command=self._clear_log).pack(side=tk.RIGHT, padx=8)
+
+        log_card = self._card(page, padding=1)
+        log_card.grid(row=1, column=0, sticky="nsew")
+        self.log_widget = tk.Text(
+            log_card,
+            state="disabled",
+            bg="#081321",
+            fg="#a9b8cc",
+            insertbackground="#f4f7fb",
+            selectbackground="#1f5eff",
             relief="flat",
+            borderwidth=0,
+            padx=14,
+            pady=12,
             font=("Consolas", 10),
         )
         self.log_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar = ttk.Scrollbar(log_tab, command=self.log_widget.yview)
+        scrollbar = ttk.Scrollbar(log_card, command=self.log_widget.yview)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.log_widget.configure(yscrollcommand=scrollbar.set)
         self.log_handler.attach(self.log_widget)
 
-        self.refresh_printers(initial=True)
-        self.root.after(3000, self._background_update_check)
+    def _build_settings_page(self, page: ttk.Frame) -> None:
+        for column in (0, 1):
+            page.columnconfigure(column, weight=1)
+        behavior = self._card(page)
+        behavior.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+        ttk.Label(behavior, text="Comportamiento", style="CardTitle.TLabel").pack(anchor="w")
+        ttk.Checkbutton(
+            behavior,
+            text="Ejecutar Moviu al iniciar Windows",
+            variable=self.auto_start_var,
+        ).pack(anchor="w", pady=(18, 8))
+        ttk.Checkbutton(
+            behavior,
+            text="Arrancar el puente USB automáticamente",
+            variable=self.bridge_autostart_var,
+        ).pack(anchor="w", pady=8)
+        ttk.Button(
+            behavior,
+            text="Guardar configuración",
+            style="Primary.TButton",
+            command=self.save_settings,
+        ).pack(anchor="w", pady=(18, 0))
+
+        updates = self._card(page)
+        updates.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+        ttk.Label(updates, text="Actualizaciones y soporte", style="CardTitle.TLabel").pack(anchor="w")
+        ttk.Label(updates, text="GitHub token privado", style="FieldLabel.TLabel").pack(
+            anchor="w", pady=(18, 6)
+        )
+        ttk.Entry(updates, textvariable=self.github_token_var, show="*").pack(fill=tk.X)
+        ttk.Button(updates, text="Buscar actualizaciones", command=self._manual_update_check).pack(
+            fill=tk.X, pady=(14, 5)
+        )
+        ttk.Button(updates, text="Ver novedades", command=self._show_changelog).pack(fill=tk.X, pady=5)
+        ttk.Button(updates, text="Abrir simulaciones", command=self.open_simulations).pack(
+            fill=tk.X, pady=5
+        )
+
+    def _build_advanced_panel(self, panel: ttk.Frame) -> None:
+        ttk.Label(panel, text="Configuración avanzada", style="AdvancedTitle.TLabel").pack(anchor="w")
+        ttk.Label(
+            panel,
+            text="Opciones técnicas del servicio local.",
+            style="AdvancedMuted.TLabel",
+        ).pack(anchor="w", pady=(4, 14))
+        self.accordions: dict[str, tuple[ttk.Button, ttk.Frame, str, bool]] = {}
+
+        scroll_host = ttk.Frame(panel, style="Advanced.TFrame")
+        scroll_host.pack(fill=tk.BOTH, expand=True)
+        self.advanced_canvas = tk.Canvas(
+            scroll_host,
+            bg="#0a1929",
+            highlightthickness=0,
+            borderwidth=0,
+            width=270,
+        )
+        advanced_scrollbar = ttk.Scrollbar(
+            scroll_host,
+            orient=tk.VERTICAL,
+            command=self.advanced_canvas.yview,
+        )
+        self.advanced_canvas.configure(yscrollcommand=advanced_scrollbar.set)
+        self.advanced_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        advanced_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        content = ttk.Frame(self.advanced_canvas, style="Advanced.TFrame")
+        self.advanced_canvas_window = self.advanced_canvas.create_window(
+            (0, 0),
+            window=content,
+            anchor="nw",
+        )
+        content.bind(
+            "<Configure>",
+            lambda _event: self.advanced_canvas.configure(
+                scrollregion=self.advanced_canvas.bbox("all")
+            ),
+        )
+        self.advanced_canvas.bind(
+            "<Configure>",
+            lambda event: self.advanced_canvas.itemconfigure(
+                self.advanced_canvas_window,
+                width=event.width,
+            ),
+        )
+        self.advanced_canvas.bind("<MouseWheel>", self._scroll_advanced_panel)
+        self.advanced_canvas.bind("<Button-4>", self._scroll_advanced_panel)
+        self.advanced_canvas.bind("<Button-5>", self._scroll_advanced_panel)
+
+        network = self._accordion(content, "network", "Red y API", expanded=True)
+        ttk.Label(network, text="Host API", style="AdvancedLabel.TLabel").pack(anchor="w")
+        ttk.Entry(network, textvariable=self.host_var).pack(fill=tk.X, pady=(4, 9))
+        ttk.Label(network, text="Puerto API", style="AdvancedLabel.TLabel").pack(anchor="w")
+        ttk.Entry(network, textvariable=self.port_var).pack(fill=tk.X, pady=(4, 9))
+        ttk.Label(network, text="API key", style="AdvancedLabel.TLabel").pack(anchor="w")
+        ttk.Entry(network, textvariable=self.api_key_var, state="readonly").pack(
+            fill=tk.X, pady=(4, 8)
+        )
+        network_actions = ttk.Frame(network, style="AdvancedBody.TFrame")
+        network_actions.pack(fill=tk.X)
+        ttk.Button(network_actions, text="Copiar", command=self._copy_api_key).pack(side=tk.LEFT)
+        ttk.Button(network_actions, text="Guardar", command=self.save_settings).pack(side=tk.RIGHT)
+        ttk.Button(
+            network,
+            text="Habilitar acceso en la red local",
+            command=self.enable_local_network_access,
+        ).pack(fill=tk.X, pady=(8, 0))
+        ttk.Button(
+            network,
+            text="Retirar acceso del firewall",
+            command=self.disable_local_network_access,
+        ).pack(fill=tk.X, pady=(4, 0))
+
+        bridge = self._accordion(content, "bridge", "Puente USB")
+        ttk.Checkbutton(
+            bridge,
+            text="Habilitar puente TCP a USB",
+            variable=self.bridge_enabled_var,
+        ).pack(anchor="w", pady=(0, 8))
+        ttk.Label(bridge, text="Impresora USB", style="AdvancedLabel.TLabel").pack(anchor="w")
+        self.printer_combo = ttk.Combobox(bridge, textvariable=self.bridge_printer_var, state="readonly")
+        self.printer_combo.pack(fill=tk.X, pady=(4, 8))
+        ttk.Label(bridge, text="Puerto TCP", style="AdvancedLabel.TLabel").pack(anchor="w")
+        ttk.Entry(bridge, textvariable=self.bridge_port_var).pack(fill=tk.X, pady=(4, 8))
+        ttk.Checkbutton(
+            bridge,
+            text="Arrancar automáticamente",
+            variable=self.bridge_autostart_var,
+        ).pack(anchor="w", pady=(0, 8))
+        ttk.Label(bridge, textvariable=self.bridge_status_var, style="AdvancedStatus.TLabel").pack(
+            anchor="w", pady=(0, 8)
+        )
+        bridge_actions = ttk.Frame(bridge, style="AdvancedBody.TFrame")
+        bridge_actions.pack(fill=tk.X)
+        ttk.Button(bridge_actions, text="Actualizar", command=self.refresh_printers).pack(side=tk.LEFT)
+        ttk.Button(bridge_actions, text="Iniciar", command=self.start_bridge).pack(side=tk.LEFT, padx=5)
+        ttk.Button(bridge_actions, text="Detener", command=self.stop_bridge).pack(side=tk.RIGHT)
+
+        security = self._accordion(content, "security", "Seguridad y certificados")
+        for label, command in [
+            ("Generar certificados SSL", self.generate_certs),
+            ("Instalar en Windows", self.install_cert_locally),
+            ("Exportar certificado CA", self.export_cert),
+            ("Abrir portal de instalación", self.open_certificate_portal),
+        ]:
+            ttk.Button(security, text=label, command=command).pack(fill=tk.X, pady=3)
+
+        diagnostics = self._accordion(content, "diagnostics", "Diagnóstico y registros")
+        ttk.Button(diagnostics, text="Ver actividad", command=lambda: self._show_page("activity")).pack(
+            fill=tk.X, pady=3
+        )
+        ttk.Button(diagnostics, text="Abrir simulaciones", command=self.open_simulations).pack(
+            fill=tk.X, pady=3
+        )
+        ttk.Button(diagnostics, text="Buscar actualizaciones", command=self._manual_update_check).pack(
+            fill=tk.X, pady=3
+        )
+        self._bind_advanced_scroll(content)
+
+    def _card(self, parent: ttk.Frame, padding: tuple[int, int] = (18, 16)) -> ttk.Frame:
+        return ttk.Frame(parent, style="Surface.TFrame", padding=padding)
+
+    def _labeled_entry(
+        self,
+        parent: ttk.Frame,
+        row: int,
+        label: str,
+        variable: tk.StringVar,
+    ) -> ttk.Entry:
+        ttk.Label(parent, text=label, style="FieldLabel.TLabel").grid(
+            row=row, column=0, sticky="w", pady=7
+        )
+        entry = ttk.Entry(parent, textvariable=variable)
+        entry.grid(row=row, column=1, sticky="ew", padx=(14, 0), pady=7)
+        return entry
+
+    def _accordion(
+        self,
+        parent: ttk.Frame,
+        key: str,
+        title: str,
+        expanded: bool = False,
+    ) -> ttk.Frame:
+        wrapper = ttk.Frame(parent, style="Advanced.TFrame")
+        wrapper.pack(fill=tk.X, pady=4)
+        header = ttk.Button(
+            wrapper,
+            text=f"{'-' if expanded else '+'}  {title}",
+            style="Accordion.TButton",
+            command=lambda: self._toggle_accordion(key),
+        )
+        header.pack(fill=tk.X)
+        body = ttk.Frame(wrapper, style="AdvancedBody.TFrame", padding=(10, 10))
+        if expanded:
+            body.pack(fill=tk.X)
+        self.accordions[key] = (header, body, title, expanded)
+        return body
+
+    def _toggle_accordion(self, key: str) -> None:
+        header, body, title, expanded = self.accordions[key]
+        expanded = not expanded
+        header.configure(text=f"{'-' if expanded else '+'}  {title}")
+        if expanded:
+            body.pack(fill=tk.X)
+        else:
+            body.pack_forget()
+        self.accordions[key] = (header, body, title, expanded)
+
+    def _scroll_advanced_panel(self, event: tk.Event) -> None:
+        if getattr(event, "num", None) == 4:
+            direction = -1
+        elif getattr(event, "num", None) == 5:
+            direction = 1
+        else:
+            direction = -1 if getattr(event, "delta", 0) > 0 else 1
+        self.advanced_canvas.yview_scroll(direction, "units")
+
+    def _bind_advanced_scroll(self, widget: tk.Misc) -> None:
+        widget.bind("<MouseWheel>", self._scroll_advanced_panel, add="+")
+        widget.bind("<Button-4>", self._scroll_advanced_panel, add="+")
+        widget.bind("<Button-5>", self._scroll_advanced_panel, add="+")
+        for child in widget.winfo_children():
+            self._bind_advanced_scroll(child)
+
+    def _toggle_advanced_panel(self) -> None:
+        if self.root.state() == "normal":
+            self.root.geometry(f"{self.root.winfo_width()}x{self.root.winfo_height()}")
+        self.advanced_panel_visible = not self.advanced_panel_visible
+        if self.advanced_panel_visible:
+            self.layout_shell.columnconfigure(2, minsize=310)
+            self.advanced_panel.grid()
+            self.advanced_toggle_btn.configure(text="Ocultar panel")
+        else:
+            self.advanced_panel.grid_remove()
+            self.layout_shell.columnconfigure(2, minsize=0)
+            self.advanced_toggle_btn.configure(text="Mostrar panel")
+
+    def _show_page(self, destination: str) -> None:
+        page = self.pages[destination]
+        page.tkraise()
+        titles = dict(NAV_ITEMS)
+        self.page_title_var.set(titles[destination])
+        for key, button in self.nav_buttons.items():
+            button.configure(style="NavActive.TButton" if key == destination else "Nav.TButton")
+
+    def _refresh_activity_summary(self) -> None:
+        if self._closing:
+            return
+        events = self.activity_feed.recent(len(self.activity_message_vars))
+        for index, message_var in enumerate(self.activity_message_vars):
+            if index < len(events):
+                event = events[index]
+                message = event.message.replace("\n", " ")
+                message_var.set(message if len(message) <= 82 else f"{message[:79]}...")
+                self.activity_time_vars[index].set(event.time_label)
+                style = "DangerDot.TLabel" if event.level in {"ERROR", "CRITICAL"} else "InfoDot.TLabel"
+                self.activity_dots[index].configure(style=style)
+            else:
+                message_var.set("Sin actividad reciente" if index == 0 else "")
+                self.activity_time_vars[index].set("")
+                self.activity_dots[index].configure(style="InfoDot.TLabel")
+        self.root.after(1200, self._refresh_activity_summary)
+
+    def _queue_ui_callback(self, callback: Callable[[], None]) -> None:
+        if not self._closing:
+            self.ui_callback_queue.put(callback)
+
+    def _poll_background_events(self) -> None:
+        if self._closing:
+            return
+
+        for message in self.log_handler.drain_pending():
+            self.log_handler.append(message)
+
+        while True:
+            try:
+                bridge_status = self.bridge_status_queue.get_nowait()
+            except Empty:
+                break
+            self.bridge_status_var.set(bridge_status)
+
+        while True:
+            try:
+                callback = self.ui_callback_queue.get_nowait()
+            except Empty:
+                break
+            callback()
+            if self._closing:
+                return
+
+        if not self._closing:
+            self.root.after(200, self._poll_background_events)
+
+    def _clear_log(self) -> None:
+        self.log_widget.configure(state="normal")
+        self.log_widget.delete("1.0", tk.END)
+        self.log_widget.configure(state="disabled")
 
     def _background_update_check(self) -> None:
         """Check for updates in a background thread."""
@@ -438,7 +964,9 @@ class DesktopApp:
             available, version, url = check_for_updates(self.config.github_token)
             if available and url:
                 self.latest_update_url = url
-                self.root.after(0, lambda: self.update_link_var.set(f"¡Nueva versión disponible: {version}!"))
+                self._queue_ui_callback(
+                    lambda: self.update_link_var.set(f"¡Nueva versión disponible: {version}!")
+                )
         
         threading.Thread(target=_target, daemon=True).start()
 
@@ -464,18 +992,24 @@ class DesktopApp:
             if info and info.get("body"):
                 content = info["body"]
                 title = f"Novedades - {info.get('tag_name', 'Última Versión')}"
-                self.root.after(0, lambda: ReleaseNotesDialog(self.root, title, content))
+                self._queue_ui_callback(lambda: ReleaseNotesDialog(self.root, title, content))
             else:
                 # Fallback to local file
                 changelog_path = Path(__file__).parent.parent / "CHANGELOG.md"
                 if changelog_path.exists():
                     try:
                         content = changelog_path.read_text(encoding="utf-8")
-                        self.root.after(0, lambda: ReleaseNotesDialog(self.root, "Novedades (Local)", content))
+                        self._queue_ui_callback(
+                            lambda: ReleaseNotesDialog(self.root, "Novedades (Local)", content)
+                        )
                     except Exception:
-                        self.root.after(0, lambda: open_release_page("https://github.com/dancoLgh/moviu/releases"))
+                        self._queue_ui_callback(
+                            lambda: open_release_page("https://github.com/dancoLgh/moviu/releases")
+                        )
                 else:
-                    self.root.after(0, lambda: open_release_page("https://github.com/dancoLgh/moviu/releases"))
+                    self._queue_ui_callback(
+                        lambda: open_release_page("https://github.com/dancoLgh/moviu/releases")
+                    )
         
         threading.Thread(target=_fetch, daemon=True).start()
 
@@ -484,10 +1018,12 @@ class DesktopApp:
         card.columnconfigure(0, weight=1)
         return card
 
-    def save_settings(self, notify: bool = True) -> None:
+    def save_settings(self, notify: bool = True, restart_running: bool = True) -> bool:
+        server_was_running = bool(self.controller.thread and self.controller.thread.is_alive())
         try:
             self.config.host = self.host_var.get()
             self.config.port = int(self.port_var.get())
+            portal_port = certificate_http_port(self.config.port)
             self.config.printer_host = self.printer_host_var.get()
             self.config.printer_port = int(self.printer_port_var.get())
             
@@ -505,16 +1041,42 @@ class DesktopApp:
             self.config.auto_start = self.auto_start_var.get()
             self.config.usb_bridge_enabled = self.bridge_enabled_var.get()
             self.config.usb_bridge_port = int(self.bridge_port_var.get())
+            instance_port = getattr(self, "instance_port", 29170)
+            if self.config.port == instance_port or portal_port == instance_port:
+                raise ValueError("El puerto está reservado para el control interno de Moviu")
+            if self.config.usb_bridge_enabled and self.config.usb_bridge_port in {
+                self.config.port,
+                portal_port,
+            }:
+                raise ValueError("El puerto del puente coincide con un puerto del servidor")
             self.config.usb_bridge_printer = self.bridge_printer_var.get()
             self.config.usb_bridge_autostart = self.bridge_autostart_var.get()
             self.config.github_token = self.github_token_var.get()
             save_config(self.config)
             self._apply_autostart(self.config.auto_start, notify=notify)
+            if restart_running and server_was_running:
+                if not self.stop_server():
+                    messagebox.showerror(
+                        "Configuración",
+                        "La configuración se guardó, pero el servidor anterior no pudo detenerse. "
+                        "Cierra Moviu y vuelve a iniciarlo para aplicar los cambios.",
+                    )
+                    return False
+                self.start_server()
+            else:
+                self._update_endpoint_url()
             if notify:
-                messagebox.showinfo("Configuración", "Configuración guardada")
+                detail = (
+                    "Configuración guardada. El servidor se está reiniciando."
+                    if restart_running and server_was_running
+                    else "Configuración guardada"
+                )
+                messagebox.showinfo("Configuración", detail)
             logging.info("Configuración guardada")
+            return True
         except ValueError:
             messagebox.showerror("Error", "Puerto inválido")
+            return False
 
     def regenerate_api_key(self) -> None:
         from secrets import token_hex
@@ -537,7 +1099,7 @@ class DesktopApp:
                 "Impresoras",
                 "No se encontraron impresoras USB. Este listado solo está disponible en Windows.",
             )
-        self.save_settings(notify=False)
+        self.save_settings(notify=False, restart_running=False)
 
     def start_bridge(self) -> None:
         if not self.bridge_enabled_var.get():
@@ -563,7 +1125,7 @@ class DesktopApp:
         try:
             self.bridge_controller.start(printer, port)
             self._update_bridge_status(f"Escuchando en 0.0.0.0:{port} → {printer}")
-            self.save_settings(notify=False)
+            self.save_settings(notify=False, restart_running=False)
         except (OSError, ValueError) as exc:
             messagebox.showerror("Puente", f"No se pudo iniciar el puente: {exc}")
             logging.exception("Error al iniciar el puente TCP → USB")
@@ -572,7 +1134,7 @@ class DesktopApp:
         self.bridge_controller.stop()
 
     def _update_bridge_status(self, text: str) -> None:
-        self.bridge_status_var.set(text)
+        self.bridge_status_queue.put(text)
         logging.info(text)
 
     def _maybe_autostart_bridge(self) -> None:
@@ -586,25 +1148,100 @@ class DesktopApp:
             self.root.after(200, self.start_server)
 
     def start_server(self) -> None:
-        self.save_settings(notify=False)
-        self.controller.start()
+        if not self.save_settings(notify=False, restart_running=False):
+            return
+        try:
+            self.controller.start()
+        except Exception as exc:  # noqa: BLE001
+            logging.exception("No se pudo preparar el servidor")
+            messagebox.showerror("Servidor", f"No se pudo iniciar el servidor:\n{exc}")
+            return
+
         display_host = self.config.host if self.config.host != "0.0.0.0" else get_local_ip()
-        self.status_title_var.set("SERVIDOR ACTIVO")
-        self.status_desc_var.set(f"Recibiendo trabajos en https://{display_host}:{self.config.port}")
-        self.status_label.configure(style="StatusRunning.TLabel")
+        self.status_title_var.set("Iniciando servidor")
+        self.status_desc_var.set(f"Preparando HTTPS en https://{display_host}:{self.config.port}")
+        self.server_badge_var.set("Iniciando")
+        self.server_badge_label.configure(style="InfoBadge.TLabel")
         self.main_action_btn.configure(state="disabled")
         self.stop_btn.configure(state="normal")
         self.full_url_var.set(f"https://{display_host}:{self.config.port}")
-        logging.info("Servidor iniciado con SSL en %s", display_host)
+        token = object()
+        self._server_start_token = token
+        deadline = time.monotonic() + 10
+        self.root.after(100, lambda: self._check_server_started(token, deadline, display_host))
 
-    def stop_server(self) -> None:
-        self.controller.stop()
-        self.status_title_var.set("SERVIDOR APAGADO")
-        self.status_desc_var.set("La impresora no recibirá trabajos hasta que inicies el servidor.")
-        self.status_label.configure(style="StatusStopped.TLabel")
+    def _check_server_started(self, token: object, deadline: float, display_host: str) -> None:
+        if self._closing or token is not self._server_start_token:
+            return
+        if (
+            self.controller.server
+            and self.controller.server.started
+            and self.controller.certificate_server
+            and self.controller.certificate_server.started
+        ):
+            self._server_start_token = None
+            self.controller.announce_mdns()
+            self.status_title_var.set("Todo listo para imprimir")
+            self.status_desc_var.set(
+                f"Moviu está conectado en https://{display_host}:{self.config.port}"
+            )
+            self.server_badge_var.set("Servidor activo")
+            self.server_badge_label.configure(style="SuccessBadge.TLabel")
+            logging.info("Servidor iniciado con SSL en %s", display_host)
+            return
+
+        threads_alive = bool(
+            self.controller.thread
+            and self.controller.thread.is_alive()
+            and self.controller.certificate_thread
+            and self.controller.certificate_thread.is_alive()
+        )
+        if not threads_alive or time.monotonic() >= deadline:
+            self._server_start_token = None
+            self.controller.stop()
+            self._set_server_stopped_state("No se pudo iniciar el servicio HTTPS.")
+            logging.error("El servidor no pudo iniciar en %s:%s", self.config.host, self.config.port)
+            messagebox.showerror(
+                "Servidor",
+                "No se pudo iniciar el servidor HTTPS o el portal HTTP. "
+                "Revisa ambos puertos y el registro de actividad.",
+            )
+            return
+
+        self.root.after(100, lambda: self._check_server_started(token, deadline, display_host))
+
+    def stop_server(self) -> bool:
+        self._server_start_token = None
+        if not self.controller.stop():
+            self.status_title_var.set("No se pudo detener el servidor")
+            self.status_desc_var.set("Cierra Moviu para finalizar los servicios en ejecución.")
+            self.server_badge_var.set("Error al detener")
+            self.server_badge_label.configure(style="DangerBadge.TLabel")
+            logging.error("El servidor no respondió al apagado")
+            return False
+        self._set_server_stopped_state(
+            "Inicia el servicio para volver a recibir trabajos de impresión."
+        )
+        logging.info("Servidor detenido")
+        return True
+
+    def _set_server_stopped_state(self, description: str) -> None:
+        self.status_title_var.set("Servidor detenido")
+        self.status_desc_var.set(description)
+        self.server_badge_var.set("Servidor detenido")
+        self.server_badge_label.configure(style="DangerBadge.TLabel")
         self.main_action_btn.configure(state="normal")
         self.stop_btn.configure(state="disabled")
-        logging.info("Servidor detenido")
+
+    def _update_endpoint_url(self) -> None:
+        display_host = self.config.host if self.config.host != "0.0.0.0" else get_local_ip()
+        self.full_url_var.set(f"https://{display_host}:{self.config.port}")
+
+    def _active_api_endpoint(self) -> tuple[str, int]:
+        server = self.controller.server
+        if server:
+            return server.config.host, int(server.config.port)
+        return self.config.host, self.config.port
 
     def _copy_api_key(self) -> None:
         self.root.clipboard_clear()
@@ -612,6 +1249,9 @@ class DesktopApp:
         messagebox.showinfo("Copiado", "API Key copiada al portapapeles")
 
     def _do_exit(self) -> None:
+        if self._closing:
+            return
+        self._closing = True
         self.stop_server()
         self.stop_bridge()
         self.tray.stop()
@@ -633,22 +1273,27 @@ class DesktopApp:
         logging.info("Ventana enviada a la bandeja del sistema; el servidor sigue activo")
 
     def _restore_from_tray(self) -> None:
-        def _show() -> None:
-            self.tray.stop()
-            try:
-                self.root.deiconify()
-                self.root.state("normal")
-                self.root.lift()
-                self.root.focus_force()
-            except Exception:
-                logging.debug("No se pudo restaurar la ventana desde la bandeja")
-
-        self.root.after(0, _show)
+        self.tray.stop()
+        try:
+            self.root.deiconify()
+            self.root.state("normal")
+            self.root.lift()
+            self.root.focus_force()
+        except Exception:
+            logging.debug("No se pudo restaurar la ventana desde la bandeja")
 
     def generate_certs(self) -> None:
-        cert_hosts = ["localhost", "127.0.0.1", get_local_ip()]
-        if self.config.host not in ("0.0.0.0", "127.0.0.1", "localhost"):
-            cert_hosts.append(self.config.host)
+        restart_server = bool(self.controller.server and self.controller.server.started)
+        server_busy = bool(self.controller.thread and self.controller.thread.is_alive())
+        if server_busy:
+            if not messagebox.askyesno(
+                "Reiniciar servidor",
+                "Para regenerar los certificados es necesario detener el servidor. ¿Continuar?",
+            ):
+                return
+            self.stop_server()
+
+        cert_hosts = _certificate_hosts(self.config)
 
         cert_path, key_path = ensure_certificates(
             Path(self.config.ssl_cert_path), 
@@ -664,11 +1309,11 @@ class DesktopApp:
             f"Certificado CA (para instalar en tablets/clientes):\n{ca_path}",
         )
         logging.info("Certificados SSL regenerados (CA + servidor)")
+        if restart_server:
+            self.start_server()
 
     def export_cert(self) -> None:
-        cert_hosts = ["localhost", "127.0.0.1", get_local_ip()]
-        if self.config.host not in ("0.0.0.0", "127.0.0.1", "localhost"):
-            cert_hosts.append(self.config.host)
+        cert_hosts = _certificate_hosts(self.config)
 
         cert_path, _ = ensure_certificates(
             Path(self.config.ssl_cert_path), Path(self.config.ssl_key_path), cert_hosts
@@ -690,9 +1335,7 @@ class DesktopApp:
             logging.info("Certificado CA exportado a %s", dest)
 
     def install_cert_locally(self) -> None:
-        cert_hosts = ["localhost", "127.0.0.1", get_local_ip()]
-        if self.config.host not in ("0.0.0.0", "127.0.0.1", "localhost"):
-            cert_hosts.append(self.config.host)
+        cert_hosts = _certificate_hosts(self.config)
 
         cert_path, _ = ensure_certificates(
             Path(self.config.ssl_cert_path),
@@ -714,6 +1357,113 @@ class DesktopApp:
                 "No se pudo instalar el certificado CA automáticamente.\n"
                 "Intenta ejecutar la aplicación como administrador o exportarlo para instalarlo manualmente."
             )
+
+    def open_certificate_portal(self) -> None:
+        if not self.controller.certificate_server or not self.controller.certificate_server.started:
+            messagebox.showwarning(
+                "Portal de certificado",
+                "Inicia el servidor antes de abrir el portal de instalación.",
+            )
+            return
+
+        ca_path = ca_certificate_path(Path(self.config.ssl_cert_path))
+        fingerprint = certificate_sha256_fingerprint(ca_path)
+        host, port = self._active_api_endpoint()
+        display_host = host if host != "0.0.0.0" else get_local_ip()
+        portal_url = f"http://{display_host}:{certificate_http_port(port)}/certificado"
+        logging.info("Abriendo portal público de certificado: %s", portal_url)
+        messagebox.showinfo(
+            "Huella del certificado Moviu",
+            "Comprueba que el portal muestre esta misma huella SHA-256:\n\n"
+            f"{fingerprint}",
+        )
+        webbrowser.open(portal_url)
+
+    def enable_local_network_access(self) -> None:
+        running_bridge = self.bridge_controller.server
+        running_bridge_port = int(running_bridge.port) if running_bridge else None
+        if not self.save_settings(notify=False):
+            return
+
+        api_port = self.config.port
+        portal_port = certificate_http_port(api_port)
+        api_host = self.config.host
+        if not is_local_network_bind(api_host):
+            messagebox.showerror(
+                "Acceso en red local",
+                "El servidor está limitado a este equipo. Configura Host API como 0.0.0.0 "
+                "y reinicia el servidor antes de habilitar el acceso desde otros dispositivos.",
+            )
+            return
+        bridge_port = running_bridge_port
+        if bridge_port is None and self.config.usb_bridge_enabled:
+            bridge_port = self.config.usb_bridge_port
+        ports = [api_port, portal_port]
+        if bridge_port and bridge_port not in ports:
+            ports.append(bridge_port)
+        port_list = ", ".join(str(port) for port in ports)
+        if not messagebox.askyesno(
+            "Habilitar acceso en red local",
+            "Moviu solicitará permisos de administrador para abrir solo conexiones TCP "
+            f"desde la red local hacia los puertos: {port_list}.\n\n¿Deseas continuar?",
+        ):
+            return
+
+        try:
+            result = open_local_network_ports(
+                api_port,
+                bridge_port,
+                certificate_port=portal_port,
+            )
+        except (NetworkAccessError, ValueError) as exc:
+            logging.error("No se pudo habilitar el acceso en la red local: %s", exc)
+            messagebox.showerror("Acceso en red local", str(exc))
+            return
+
+        if not result.rules_changed:
+            logging.info("No hay un firewall activo; no fue necesario crear reglas")
+            messagebox.showinfo(
+                "Acceso en red local",
+                "No hay un firewall activo en el sistema. Moviu ya puede recibir conexiones "
+                f"en los puertos TCP {port_list}.",
+            )
+            return
+
+        logging.info(
+            "Acceso local habilitado mediante %s para puertos %s",
+            result.firewall,
+            port_list,
+        )
+        messagebox.showinfo(
+            "Acceso en red local",
+            f"Reglas aplicadas correctamente mediante {result.firewall}.\n\n"
+            f"Puertos TCP disponibles para la red local: {port_list}",
+        )
+
+    def disable_local_network_access(self) -> None:
+        if not messagebox.askyesno(
+            "Retirar acceso del firewall",
+            "Moviu solicitará permisos de administrador para retirar todas las reglas de "
+            "firewall que administra. ¿Deseas continuar?",
+        ):
+            return
+        try:
+            result = close_local_network_ports()
+        except NetworkAccessError as exc:
+            logging.error("No se pudo retirar el acceso del firewall: %s", exc)
+            messagebox.showerror("Acceso en red local", str(exc))
+            return
+        if not result.rules_changed:
+            messagebox.showinfo(
+                "Acceso en red local",
+                "Moviu no tiene reglas de firewall administradas en este equipo.",
+            )
+            return
+        logging.info("Se retiraron las reglas de firewall administradas por Moviu")
+        messagebox.showinfo(
+            "Acceso en red local",
+            "Se retiraron correctamente las reglas de firewall administradas por Moviu.",
+        )
 
     def open_simulations(self) -> None:
         sims = CONFIG_DIR / "simulated_jobs"
@@ -747,58 +1497,109 @@ class DesktopApp:
                 logging.StreamHandler(),
             ],
         )
-        self.log_handler = _TextHandler(None)
+        self.log_handler = _TextHandler(None, self.activity_feed)
         formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
         self.log_handler.setFormatter(formatter)
         logging.getLogger().addHandler(self.log_handler)
 
     def _setup_theme(self) -> None:
-        self.root.configure(bg="#0f172a")
+        background = "#07111f"
+        sidebar = "#081827"
+        topbar = "#091625"
+        surface = "#102238"
+        advanced = "#0a1929"
+        text = "#f4f7fb"
+        muted = "#94a4b8"
+        blue = "#2d6cdf"
+        green = "#32c36c"
+        red = "#f25f68"
+
+        self.root.configure(bg=background)
         style = ttk.Style()
         try:
             style.theme_use("clam")
         except Exception:
             pass
 
-        style.configure("TFrame", background="#0f172a")
-        style.configure("Card.TFrame", background="#0f172a")
-        style.configure("CardInner.TFrame", background="#0f172a")
-        style.configure("TLabel", background="#0f172a", foreground="#e2e8f0")
-        style.configure("Headline.TLabel", font=("Segoe UI Semibold", 18), foreground="#f8fafc")
-        style.configure("Subhead.TLabel", font=("Segoe UI", 11), foreground="#94a3b8")
-        style.configure("Status.TLabel", foreground="#38bdf8", font=("Segoe UI", 11))
-        style.configure("StatusRunning.TLabel", foreground="#22c55e", font=("Segoe UI Bold", 24))
-        style.configure("StatusStopped.TLabel", foreground="#ef4444", font=("Segoe UI Bold", 24))
-        
+        style.configure("TFrame", background=background)
+        style.configure("App.TFrame", background=background)
+        style.configure("Page.TFrame", background=background)
+        style.configure("Sidebar.TFrame", background=sidebar)
+        style.configure("Topbar.TFrame", background=topbar)
+        style.configure("Surface.TFrame", background=surface, relief="flat")
+        style.configure("ActivityRow.TFrame", background="#0d1d30")
+        style.configure("Advanced.TFrame", background=advanced)
+        style.configure("AdvancedBody.TFrame", background=surface)
+
+        style.configure("TLabel", background=background, foreground=text, font=("Segoe UI", 10))
+        style.configure("Sidebar.TLabel", background=sidebar, foreground=text)
+        style.configure("Brand.TLabel", background=sidebar, foreground=text, font=("Segoe UI Semibold", 18))
+        style.configure("BrandMeta.TLabel", background=sidebar, foreground=muted, font=("Segoe UI", 8))
+        style.configure("NavSection.TLabel", background=sidebar, foreground="#5f7895", font=("Segoe UI Semibold", 8))
+        style.configure("PageTitle.TLabel", background=topbar, foreground=text, font=("Segoe UI Semibold", 16))
+        style.configure("Update.TLabel", background=topbar, foreground="#58a6ff", font=("Segoe UI Semibold", 9))
+        style.configure("HeroTitle.TLabel", background=surface, foreground=text, font=("Segoe UI Semibold", 20))
+        style.configure("CardTitle.TLabel", background=surface, foreground=text, font=("Segoe UI Semibold", 11))
+        style.configure("Metric.TLabel", background=surface, foreground=text, font=("Segoe UI Semibold", 19))
+        style.configure("BodyStrong.TLabel", background=surface, foreground="#d9e3ef", font=("Segoe UI Semibold", 10))
+        style.configure("FieldLabel.TLabel", background=surface, foreground="#c4d0df", font=("Segoe UI", 9))
+        style.configure("Muted.TLabel", background=surface, foreground=muted, font=("Segoe UI", 9))
+        style.configure("Activity.TLabel", background="#0d1d30", foreground="#d9e3ef", font=("Segoe UI", 9))
+        style.configure("Status.TLabel", background=surface, foreground="#58a6ff", font=("Segoe UI", 9))
+        style.configure("InfoDot.TLabel", background="#0d1d30", foreground="#58a6ff", font=("Segoe UI Bold", 10))
+        style.configure("DangerDot.TLabel", background="#0d1d30", foreground=red, font=("Segoe UI Bold", 10))
+        style.configure("InfoBadge.TLabel", background="#12345d", foreground="#82b8ff", font=("Segoe UI Semibold", 9), padding=(8, 4))
+        style.configure("SuccessBadge.TLabel", background="#123d2d", foreground="#5cdd8b", font=("Segoe UI Semibold", 9), padding=(8, 4))
+        style.configure("DangerBadge.TLabel", background="#44242d", foreground="#ff8992", font=("Segoe UI Semibold", 9), padding=(8, 4))
+        style.configure("AdvancedTitle.TLabel", background=advanced, foreground=text, font=("Segoe UI Semibold", 15))
+        style.configure("AdvancedMuted.TLabel", background=advanced, foreground=muted, font=("Segoe UI", 8))
+        style.configure("AdvancedLabel.TLabel", background=surface, foreground="#c4d0df", font=("Segoe UI", 8))
+        style.configure("AdvancedStatus.TLabel", background=surface, foreground="#58a6ff", font=("Segoe UI", 8))
+
         style.configure(
             "TButton",
-            background="#1d4ed8",
-            foreground="#e2e8f0",
-            padding=6,
+            background="#163052",
+            foreground="#dce7f5",
+            padding=(10, 7),
+            borderwidth=0,
+            font=("Segoe UI Semibold", 9),
         )
         style.map(
             "TButton",
-            background=[("active", "#2563eb")],
-            relief=[("pressed", "groove")],
+            background=[("active", "#204674"), ("disabled", "#17263a")],
+            foreground=[("disabled", "#60748a")],
         )
-        
-        style.configure("Action.TButton", font=("Segoe UI Semibold", 10), padding=10)
-        style.configure("Big.TButton", font=("Segoe UI Bold", 12), padding=12)
+        style.configure("Primary.TButton", background=blue, foreground="#ffffff", padding=(14, 9))
+        style.map("Primary.TButton", background=[("active", "#3f7ef2"), ("disabled", "#1b3355")])
+        style.configure("Secondary.TButton", background="#10233a", foreground="#c9d6e5")
+        style.configure("Outline.TButton", background=surface, foreground="#72a8ff", borderwidth=1, relief="solid")
+        style.map("Outline.TButton", background=[("active", "#173453")])
+        style.configure("Link.TButton", background=surface, foreground="#72a8ff", padding=(6, 3))
+        style.map("Link.TButton", background=[("active", surface)], foreground=[("active", "#a4c8ff")])
+        style.configure("Nav.TButton", background=sidebar, foreground="#a6b6c9", anchor="w", padding=(12, 10))
+        style.map("Nav.TButton", background=[("active", "#102a46")], foreground=[("active", text)])
+        style.configure("NavActive.TButton", background="#173a69", foreground="#ffffff", anchor="w", padding=(12, 10))
+        style.map("NavActive.TButton", background=[("active", "#1d4b86")])
+        style.configure("Accordion.TButton", background="#10233a", foreground="#dce7f5", anchor="w", padding=(10, 10))
+        style.map("Accordion.TButton", background=[("active", "#173553")])
 
-        style.configure("Card.TLabelframe", background="#0f172a", foreground="#cbd5e1")
         style.configure(
-            "Card.TLabelframe.Label",
-            background="#0f172a",
-            foreground="#cbd5e1",
-            font=("Segoe UI Semibold", 11),
+            "TEntry",
+            fieldbackground="#0a1727",
+            foreground="#dce7f5",
+            insertcolor="#ffffff",
+            bordercolor="#2a405b",
+            lightcolor="#2a405b",
+            darkcolor="#2a405b",
+            padding=7,
         )
-        
-        # Notebook styling
-        style.configure("TNotebook", background="#0f172a", borderwidth=0)
-        style.configure("TNotebook.Tab", background="#1e293b", foreground="#94a3b8", padding=[12, 4])
-        style.map("TNotebook.Tab", 
-                  background=[("selected", "#0f172a")],
-                  foreground=[("selected", "#38bdf8")])
+        style.map("TEntry", fieldbackground=[("readonly", "#0a1727")], foreground=[("readonly", "#aebdd0")])
+        style.configure("TCombobox", fieldbackground="#0a1727", background="#163052", foreground="#dce7f5", padding=6)
+        style.map("TCombobox", fieldbackground=[("readonly", "#0a1727")], foreground=[("readonly", "#dce7f5")])
+        style.configure("TCheckbutton", background=surface, foreground="#c4d0df", font=("Segoe UI", 9))
+        style.map("TCheckbutton", background=[("active", surface)], foreground=[("active", text)])
+        style.configure("Horizontal.TScale", background=surface, troughcolor="#0a1727")
+        style.configure("TSeparator", background="#1d3149")
 
     def _configure_window_hooks(self) -> None:
         self.root.protocol("WM_DELETE_WINDOW", self._minimize_to_background)
@@ -937,20 +1738,36 @@ class ReleaseNotesDialog(tk.Toplevel):
 class _TextHandler(logging.Handler):
     """Send log records to a Tkinter Text widget."""
 
-    def __init__(self, widget: tk.Text | None) -> None:
+    def __init__(self, widget: tk.Text | None, activity_feed: ActivityFeed) -> None:
         super().__init__()
         self.widget = widget
+        self.activity_feed = activity_feed
+        self.pending: Queue[str] = Queue(maxsize=1000)
 
     def attach(self, widget: tk.Text) -> None:
         self.widget = widget
+        existing = reversed(self.activity_feed.recent(100))
+        for event in existing:
+            self.append(f"{event.time_label} [{event.level}] {event.message}")
+        self.drain_pending()
 
     def emit(self, record: logging.LogRecord) -> None:
-        if not self.widget:
-            return
-        msg = self.format(record)
-        self.widget.after(0, self._append, msg)
+        self.activity_feed.add(record.levelname, record.getMessage(), record.created)
+        try:
+            self.pending.put_nowait(self.format(record))
+        except Full:
+            pass
 
-    def _append(self, msg: str) -> None:
+    def drain_pending(self, limit: int = 200) -> list[str]:
+        messages: list[str] = []
+        for _index in range(limit):
+            try:
+                messages.append(self.pending.get_nowait())
+            except Empty:
+                break
+        return messages
+
+    def append(self, msg: str) -> None:
         if not self.widget:
             return
         self.widget.configure(state="normal")
@@ -992,17 +1809,7 @@ class SystemTray:
         self.on_exit()
 
     def _create_image(self) -> Image.Image:
-        size = 64
-        image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(image)
-        draw.rounded_rectangle((6, 6, size - 6, size - 6), radius=12, fill=(24, 79, 254, 255))
-        font = ImageFont.load_default()
-        text = "M"
-        bbox = draw.textbbox((0, 0), text, font=font)
-        text_w = bbox[2] - bbox[0]
-        text_h = bbox[3] - bbox[1]
-        draw.text(((size - text_w) / 2, (size - text_h) / 2), text, font=font, fill="white")
-        return image
+        return load_app_icon(64)
 
 
 def _ensure_streams() -> None:

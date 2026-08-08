@@ -24,6 +24,20 @@ def get_local_ip() -> str:
         return "127.0.0.1"
 
 
+def get_local_ips() -> list[str]:
+    """Return the IPv4 addresses that clients may use to reach this machine."""
+
+    addresses = [get_local_ip()]
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            address = info[4][0]
+            if address != "0.0.0.0" and address not in addresses:
+                addresses.append(address)
+    except OSError:
+        pass
+    return addresses
+
+
 class MoviuServiceAnnouncer:
     """Announce the Moviu Print Server via mDNS/DNS-SD."""
 
