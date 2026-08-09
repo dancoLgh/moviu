@@ -1,9 +1,20 @@
 document.documentElement.classList.add("enhanced");
 
+function renderLucideIcons() {
+  if (!window.lucide) return;
+  window.lucide.createIcons();
+  document.documentElement.classList.add("icons-ready");
+}
+
+const lucideLibrary = document.querySelector("[data-lucide-library]");
+if (window.lucide) renderLucideIcons();
+else lucideLibrary?.addEventListener("load", renderLucideIcons, { once: true });
+
 const header = document.querySelector("[data-header]");
 const menuButton = document.querySelector("[data-menu-button]");
 const menu = document.querySelector("[data-menu]");
 const copyButton = document.querySelector("[data-copy-code]");
+const copyLabel = document.querySelector("[data-copy-label]");
 const codeBlock = document.querySelector("[data-code]");
 const downloadModal = document.querySelector("[data-download-modal]");
 const downloadDialog = downloadModal?.querySelector("[role='dialog']");
@@ -66,9 +77,9 @@ copyButton?.addEventListener("click", async () => {
     return;
   }
   await navigator.clipboard.writeText(codeBlock.textContent.trim());
-  copyButton.textContent = "Copiado";
+  if (copyLabel) copyLabel.textContent = "Copiado";
   window.setTimeout(() => {
-    copyButton.textContent = "Copiar";
+    if (copyLabel) copyLabel.textContent = "Copiar";
   }, 1600);
 });
 

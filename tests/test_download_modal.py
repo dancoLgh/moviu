@@ -36,8 +36,8 @@ class DownloadDonationModalTests(unittest.TestCase):
         self.assertIn("normalizeDonationAmount(amount)", self.script)
 
     def test_site_declares_a_local_favicon(self):
-        self.assertIn('rel="icon" href="favicon.svg"', self.html)
-        self.assertTrue((SITE / "favicon.svg").is_file())
+        self.assertIn('rel="icon" href="assets/moviu-mark.png"', self.html)
+        self.assertTrue((SITE / "assets" / "moviu-mark.png").is_file())
 
     def test_download_is_not_conditional_on_donation(self):
         self.assertIn("createDownloadScheduler", self.script)
