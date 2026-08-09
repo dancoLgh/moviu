@@ -71,6 +71,16 @@ class GitHubPagesTest(unittest.TestCase):
         self.assertIn("qz tray", plain_text)
         self.assertIn("jsprintmanager", plain_text)
         self.assertIn("certificado", plain_text)
+        self.assertIn("odoo iot", plain_text)
+        self.assertIn("sin depender de odoo iot", plain_text)
+        self.assertIn("punto de venta", plain_text)
+        self.assertIn("back office", plain_text)
+        self.assertIn("addons que conectan esos flujos con moviu", plain_text)
+
+    def test_odoo_addons_contact_is_available(self) -> None:
+        self.assertIn("mailto:daniel@dawnpy.com", self.parser.links)
+        self.assertIn('data-lucide="puzzle"', self.html)
+        self.assertIn('data-lucide="mail"', self.html)
 
     def test_pages_workflow_deploys_site_directory(self) -> None:
         workflow = (ROOT / ".github/workflows/pages.yml").read_text(encoding="utf-8")

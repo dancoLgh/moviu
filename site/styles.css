@@ -1020,6 +1020,64 @@ h1 span {
   font-size: 19px !important;
 }
 
+.story-odoo {
+  display: grid;
+  margin-top: 26px;
+  padding: 18px;
+  border: 1px solid rgba(88, 166, 255, .25);
+  border-radius: 13px;
+  grid-template-columns: auto 1fr;
+  gap: 14px;
+  background: linear-gradient(135deg, rgba(18, 52, 93, .58), rgba(11, 29, 52, .72));
+}
+
+.story-odoo-icon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  place-items: center;
+  background: #12345d;
+  color: #82b8ff;
+}
+
+.story-odoo-icon .lucide {
+  width: 21px;
+  height: 21px;
+}
+
+.story-odoo strong {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--text);
+  font-size: 15px;
+}
+
+.story-odoo p {
+  margin-bottom: 10px;
+  color: #9fb0c4;
+  font-size: 14px !important;
+  line-height: 1.55;
+}
+
+.story-odoo a {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #76adff;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.story-odoo a:hover {
+  color: #acd0ff;
+}
+
+.story-odoo a .lucide {
+  width: 15px;
+  height: 15px;
+}
+
 .story-values {
   display: flex;
   margin-top: 33px;
