@@ -2,6 +2,18 @@
 
 Todos los cambios notables en este proyecto serán documentados en este archivo.
 
+## [1.2.0] - 2026-08-09
+
+### Añadido
+- Ayuda contextual mediante botones `?` en los principales campos técnicos de la aplicación.
+- Página de ayuda integrada para configurar impresoras de red, el puente USB, la API y los certificados.
+- URL visible y copiable del portal HTTP para instalar el certificado CA en los clientes.
+
+### Mejorado
+- Las configuraciones nuevas usan `127.0.0.1` como destino de impresión predeterminado para facilitar el uso del puente USB local.
+- El panel de inicio identifica si el destino apunta al puente USB local o a una impresora de red.
+- El sitio del proyecto incorpora iconografía consistente, una historia de integración con Odoo y el flujo opcional de aportes mediante dLocal Go.
+
 ## [1.1.0] - 2026-08-07
 
 ### Añadido

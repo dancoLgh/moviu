@@ -40,6 +40,14 @@ def make_app(server_running: bool) -> DesktopApp:
 
 
 class SaveSettingsTests(unittest.TestCase):
+    def test_new_configuration_defaults_to_local_print_destination(self):
+        self.assertEqual(AppConfig().printer_host, "127.0.0.1")
+
+    def test_existing_printer_destination_is_preserved(self):
+        config = AppConfig.from_dict({"printer_host": "192.168.1.50"})
+
+        self.assertEqual(config.printer_host, "192.168.1.50")
+
     @patch("moviu_server.app.messagebox.showinfo")
     @patch("moviu_server.app.save_config")
     def test_running_server_is_restarted_after_settings_change(self, save_config, showinfo):
@@ -79,6 +87,22 @@ class SaveSettingsTests(unittest.TestCase):
 
         app.start_server.assert_not_called()
         showerror.assert_called_once()
+
+
+class CertificateUrlTests(unittest.TestCase):
+    @patch("moviu_server.app.messagebox.showinfo")
+    def test_copy_certificate_url_places_visible_url_on_clipboard(self, showinfo):
+        app = object.__new__(DesktopApp)
+        app.root = MagicMock()
+        app.certificate_url_var = Value("http://192.168.1.20:9001/certificado")
+
+        app._copy_certificate_url()
+
+        app.root.clipboard_clear.assert_called_once_with()
+        app.root.clipboard_append.assert_called_once_with(
+            "http://192.168.1.20:9001/certificado"
+        )
+        showinfo.assert_called_once()
 
 
 class NetworkAccessSettingsTests(unittest.TestCase):

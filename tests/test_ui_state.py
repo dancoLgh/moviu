@@ -1,6 +1,12 @@
 import unittest
 
-from moviu_server.ui_state import ActivityFeed, NAV_ITEMS
+from moviu_server.ui_state import (
+    ActivityFeed,
+    NAV_ITEMS,
+    certificate_portal_url,
+    printer_route_label,
+    tooltip_coordinates,
+)
 
 
 class ActivityFeedTests(unittest.TestCase):
@@ -31,7 +37,37 @@ class ActivityFeedTests(unittest.TestCase):
         self.assertEqual(len(destinations), len(set(destinations)))
         self.assertEqual(
             destinations,
-            ["home", "printers", "connection", "activity", "settings"],
+            ["home", "printers", "connection", "activity", "settings", "help"],
+        )
+
+    def test_certificate_portal_uses_client_facing_host_and_next_port(self):
+        self.assertEqual(
+            certificate_portal_url("0.0.0.0", 9001, "192.168.1.20"),
+            "http://192.168.1.20:9001/certificado",
+        )
+        self.assertEqual(
+            certificate_portal_url("localhost", 8001, "192.168.1.20"),
+            "http://localhost:8001/certificado",
+        )
+
+    def test_printer_route_identifies_matching_local_bridge(self):
+        self.assertEqual(
+            printer_route_label("127.0.0.1", 9100, True, 9100),
+            "Puente USB local",
+        )
+        self.assertEqual(
+            printer_route_label("127.0.0.1", 9100, False, 9100),
+            "Ruta local; habilita el puente USB",
+        )
+        self.assertEqual(
+            printer_route_label("192.168.1.50", 9100, True, 9100),
+            "Impresora de red",
+        )
+
+    def test_tooltip_moves_left_and_stays_inside_screen(self):
+        self.assertEqual(
+            tooltip_coordinates(980, 740, 24, 300, 100, 1024, 768),
+            (672, 660),
         )
 
 

@@ -10,7 +10,7 @@ from typing import Optional
 
 CONFIG_DIR = Path.home() / ".moviu_printer"
 CONFIG_FILE = CONFIG_DIR / "config.json"
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 
 
 @dataclass
@@ -20,7 +20,7 @@ class AppConfig:
     host: str = "0.0.0.0"
     port: int = 9000
     api_key: str = secrets.token_hex(16)
-    printer_host: str = "192.168.0.100"
+    printer_host: str = "127.0.0.1"
     printer_port: int = 9100
     printer_width: int = 576
     printer_gamma: int = 500

@@ -44,7 +44,13 @@ from .network_access import (
 )
 from .logging_config import build_uvicorn_log_config
 from .resources import APP_ICON_ICO_PATH, load_app_icon
-from .ui_state import ActivityFeed, NAV_ITEMS
+from .ui_state import (
+    ActivityFeed,
+    NAV_ITEMS,
+    certificate_portal_url,
+    printer_route_label,
+    tooltip_coordinates,
+)
 from .updater import check_for_updates, open_release_page
 
 
@@ -82,6 +88,69 @@ def _certificate_hosts(config: AppConfig) -> list[str]:
     if config.host not in ("0.0.0.0", "127.0.0.1", "localhost"):
         hosts.append(config.host)
     return hosts
+
+
+class HelpTooltip:
+    """Small contextual popover shown by a field's help button."""
+
+    def __init__(self, widget: ttk.Button, text: str) -> None:
+        self.widget = widget
+        self.text = text
+        self.window: tk.Toplevel | None = None
+        self.pinned = False
+        widget.configure(command=self.toggle)
+        widget.bind("<Enter>", self._show_on_hover, add="+")
+        widget.bind("<Leave>", self._hide_after_hover, add="+")
+
+    def _show_on_hover(self, _event: tk.Event) -> None:
+        self.show()
+
+    def _hide_after_hover(self, _event: tk.Event) -> None:
+        if not self.pinned:
+            self.hide()
+
+    def toggle(self) -> None:
+        if self.window is not None and self.pinned:
+            self.pinned = False
+            self.hide()
+            return
+        self.pinned = True
+        self.show()
+
+    def show(self) -> None:
+        if self.window is not None:
+            return
+        self.window = tk.Toplevel(self.widget)
+        self.window.wm_overrideredirect(True)
+        self.window.configure(bg="#2a405b")
+        label = tk.Label(
+            self.window,
+            text=self.text,
+            justify=tk.LEFT,
+            wraplength=320,
+            bg="#102238",
+            fg="#dce7f5",
+            padx=12,
+            pady=9,
+            font=("Segoe UI", 9),
+        )
+        label.pack(padx=1, pady=1)
+        self.window.update_idletasks()
+        x, y = tooltip_coordinates(
+            self.widget.winfo_rootx(),
+            self.widget.winfo_rooty(),
+            self.widget.winfo_width(),
+            self.window.winfo_reqwidth(),
+            self.window.winfo_reqheight(),
+            self.widget.winfo_screenwidth(),
+            self.widget.winfo_screenheight(),
+        )
+        self.window.wm_geometry(f"+{x}+{y}")
+
+    def hide(self) -> None:
+        if self.window is not None:
+            self.window.destroy()
+            self.window = None
 
 
 class ServerController:
@@ -292,8 +361,24 @@ class DesktopApp:
         self.bridge_status_var = tk.StringVar(value="Puente detenido")
         self.github_token_var = tk.StringVar(value=self.config.github_token)
         self.available_printers: list[str] = []
+        self.help_tooltips: list[HelpTooltip] = []
         display_host = self.config.host if self.config.host != "0.0.0.0" else get_local_ip()
         self.full_url_var = tk.StringVar(value=f"https://{display_host}:{self.config.port}")
+        self.certificate_url_var = tk.StringVar(
+            value=certificate_portal_url(
+                self.config.host,
+                certificate_http_port(self.config.port),
+                display_host,
+            )
+        )
+        self.printer_route_var = tk.StringVar(
+            value=printer_route_label(
+                self.config.printer_host,
+                self.config.printer_port,
+                self.config.usb_bridge_enabled,
+                self.config.usb_bridge_port,
+            )
+        )
 
         self.root.minsize(1050, 680)
         self.root.rowconfigure(0, weight=1)
@@ -339,7 +424,7 @@ class DesktopApp:
         ttk.Separator(sidebar).grid(row=3, column=0, sticky="ew", pady=12)
         ttk.Button(
             sidebar,
-            text="Ayuda y novedades",
+            text="Novedades",
             style="Nav.TButton",
             command=self._show_changelog,
         ).grid(row=4, column=0, sticky="ew")
@@ -388,6 +473,7 @@ class DesktopApp:
         self._build_connection_page(self.pages["connection"])
         self._build_activity_page(self.pages["activity"])
         self._build_settings_page(self.pages["settings"])
+        self._build_help_page(self.pages["help"])
 
         self.advanced_panel = ttk.Frame(
             shell,
@@ -451,11 +537,21 @@ class DesktopApp:
 
         printer_card = self._card(page)
         printer_card.grid(row=1, column=0, sticky="nsew", padx=(0, 6), pady=(0, 12))
-        ttk.Label(printer_card, text="Impresora predeterminada", style="CardTitle.TLabel").pack(anchor="w")
+        printer_title = ttk.Frame(printer_card, style="Surface.TFrame")
+        printer_title.pack(fill=tk.X)
+        ttk.Label(printer_title, text="Impresora predeterminada", style="CardTitle.TLabel").pack(
+            side=tk.LEFT
+        )
+        self._help_button(
+            printer_title,
+            "Es el destino de respaldo cuando un trabajo no indica otra impresora.",
+        ).pack(side=tk.LEFT, padx=(6, 0))
         ttk.Label(printer_card, textvariable=self.printer_host_var, style="Metric.TLabel").pack(
             anchor="w", pady=(12, 2)
         )
-        ttk.Label(printer_card, text="Impresora de red configurada", style="InfoBadge.TLabel").pack(anchor="w")
+        ttk.Label(printer_card, textvariable=self.printer_route_var, style="InfoBadge.TLabel").pack(
+            anchor="w"
+        )
         printer_meta = ttk.Frame(printer_card, style="Surface.TFrame")
         printer_meta.pack(fill=tk.X, pady=(16, 10))
         ttk.Label(printer_meta, text="Puerto", style="Muted.TLabel").grid(row=0, column=0, sticky="w")
@@ -534,8 +630,20 @@ class DesktopApp:
         ttk.Label(network, text="Impresora de red", style="CardTitle.TLabel").grid(
             row=0, column=0, columnspan=2, sticky="w", pady=(0, 14)
         )
-        self._labeled_entry(network, 1, "Host o dirección IP", self.printer_host_var)
-        self._labeled_entry(network, 2, "Puerto", self.printer_port_var)
+        self._labeled_entry(
+            network,
+            1,
+            "Host o dirección IP",
+            self.printer_host_var,
+            "Usa 127.0.0.1 para enviar al puente USB de este equipo. Usa la IP de la impresora para imprimir directamente por red.",
+        )
+        self._labeled_entry(
+            network,
+            2,
+            "Puerto",
+            self.printer_port_var,
+            "Puerto TCP del destino. El valor habitual para impresión RAW es 9100 y debe coincidir con el puerto del puente USB.",
+        )
 
         rendering = self._card(page)
         rendering.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
@@ -594,6 +702,24 @@ class DesktopApp:
         ttk.Label(api_card, text="Acceso a la API", style="CardTitle.TLabel").pack(anchor="w")
         ttk.Label(api_card, text="URL HTTPS", style="FieldLabel.TLabel").pack(anchor="w", pady=(16, 6))
         ttk.Entry(api_card, textvariable=self.full_url_var, state="readonly").pack(fill=tk.X)
+        portal_heading = ttk.Frame(api_card, style="Surface.TFrame")
+        portal_heading.pack(fill=tk.X, pady=(14, 6))
+        ttk.Label(portal_heading, text="Portal de certificado (HTTP)", style="FieldLabel.TLabel").pack(
+            side=tk.LEFT
+        )
+        self._help_button(
+            portal_heading,
+            "Abre esta dirección desde cada tablet o PC cliente para descargar e instalar el certificado CA antes de usar HTTPS.",
+        ).pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Entry(api_card, textvariable=self.certificate_url_var, state="readonly").pack(fill=tk.X)
+        portal_actions = ttk.Frame(api_card, style="Surface.TFrame")
+        portal_actions.pack(fill=tk.X, pady=(8, 0))
+        ttk.Button(portal_actions, text="Copiar URL", command=self._copy_certificate_url).pack(side=tk.LEFT)
+        ttk.Button(
+            portal_actions,
+            text="Abrir portal",
+            command=self.open_certificate_portal,
+        ).pack(side=tk.LEFT, padx=(8, 0))
         ttk.Label(api_card, text="API key", style="FieldLabel.TLabel").pack(anchor="w", pady=(14, 6))
         ttk.Entry(api_card, textvariable=self.api_key_var, state="readonly").pack(fill=tk.X)
         api_actions = ttk.Frame(api_card, style="Surface.TFrame")
@@ -609,8 +735,20 @@ class DesktopApp:
         ttk.Label(cert_card, text="Red y certificados", style="CardTitle.TLabel").grid(
             row=0, column=0, columnspan=2, sticky="w", pady=(0, 14)
         )
-        self._labeled_entry(cert_card, 1, "Host API", self.host_var)
-        self._labeled_entry(cert_card, 2, "Puerto API", self.port_var)
+        self._labeled_entry(
+            cert_card,
+            1,
+            "Host API",
+            self.host_var,
+            "0.0.0.0 permite conexiones desde la red local. 127.0.0.1 limita la API a este equipo. Los clientes usan la IP local mostrada en URL HTTPS.",
+        )
+        self._labeled_entry(
+            cert_card,
+            2,
+            "Puerto API",
+            self.port_var,
+            "Puerto HTTPS de Moviu. El portal HTTP de certificados utiliza automáticamente el puerto siguiente.",
+        )
         for row_index, (label, command) in enumerate(
             [
                 ("Generar certificados SSL", self.generate_certs),
@@ -700,6 +838,64 @@ class DesktopApp:
             fill=tk.X, pady=5
         )
 
+    def _build_help_page(self, page: ttk.Frame) -> None:
+        for column in (0, 1):
+            page.columnconfigure(column, weight=1)
+        page.rowconfigure(0, weight=1)
+
+        printer = self._card(page)
+        printer.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+        ttk.Label(printer, text="Destino de impresión", style="CardTitle.TLabel").pack(anchor="w")
+        ttk.Label(
+            printer,
+            text=(
+                "La impresora predeterminada recibe los trabajos que no indican otro destino.\n\n"
+                "Impresora de red: escribe su IP y puerto RAW, normalmente 9100.\n\n"
+                "Impresora USB: usa 127.0.0.1, activa el puente USB, selecciona la impresora "
+                "de Windows y configura el mismo puerto en ambos lugares."
+            ),
+            style="Muted.TLabel",
+            justify=tk.LEFT,
+            wraplength=360,
+        ).pack(anchor="w", fill=tk.X, pady=(14, 18))
+        ttk.Button(
+            printer,
+            text="Configurar impresora",
+            style="Outline.TButton",
+            command=lambda: self._show_page("printers"),
+        ).pack(fill=tk.X, side=tk.BOTTOM)
+
+        connection = self._card(page)
+        connection.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+        ttk.Label(connection, text="Conexión y certificados", style="CardTitle.TLabel").pack(anchor="w")
+        ttk.Label(
+            connection,
+            text=(
+                "Host API 0.0.0.0 hace que Moviu escuche en la red local; los clientes se conectan "
+                "usando la IP local mostrada por la aplicación.\n\n"
+                "Para preparar un cliente: inicia el servidor, abre allí el portal HTTP, comprueba "
+                "la huella, instala el certificado CA y después utiliza la URL HTTPS con la API key."
+            ),
+            style="Muted.TLabel",
+            justify=tk.LEFT,
+            wraplength=360,
+        ).pack(anchor="w", fill=tk.X, pady=(14, 10))
+        ttk.Label(connection, text="Portal para clientes", style="FieldLabel.TLabel").pack(
+            anchor="w", pady=(4, 6)
+        )
+        ttk.Entry(connection, textvariable=self.certificate_url_var, state="readonly").pack(fill=tk.X)
+        help_actions = ttk.Frame(connection, style="Surface.TFrame")
+        help_actions.pack(fill=tk.X, pady=(10, 0), side=tk.BOTTOM)
+        ttk.Button(help_actions, text="Copiar URL", command=self._copy_certificate_url).pack(
+            side=tk.LEFT
+        )
+        ttk.Button(
+            help_actions,
+            text="Ir a Conexión",
+            style="Outline.TButton",
+            command=lambda: self._show_page("connection"),
+        ).pack(side=tk.RIGHT)
+
     def _build_advanced_panel(self, panel: ttk.Frame) -> None:
         ttk.Label(panel, text="Configuración avanzada", style="AdvancedTitle.TLabel").pack(anchor="w")
         ttk.Label(
@@ -774,6 +970,15 @@ class DesktopApp:
         ).pack(fill=tk.X, pady=(4, 0))
 
         bridge = self._accordion(content, "bridge", "Puente USB")
+        bridge_help = ttk.Frame(bridge, style="AdvancedBody.TFrame")
+        bridge_help.pack(fill=tk.X, pady=(0, 8))
+        ttk.Label(bridge_help, text="Convierte TCP en impresión USB", style="AdvancedLabel.TLabel").pack(
+            side=tk.LEFT
+        )
+        self._help_button(
+            bridge_help,
+            "Recibe trabajos en un puerto TCP local y los entrega a la impresora USB seleccionada. Configura 127.0.0.1 y el mismo puerto como impresora predeterminada.",
+        ).pack(side=tk.RIGHT)
         ttk.Checkbutton(
             bridge,
             text="Habilitar puente TCP a USB",
@@ -828,13 +1033,21 @@ class DesktopApp:
         row: int,
         label: str,
         variable: tk.StringVar,
+        help_text: str | None = None,
     ) -> ttk.Entry:
-        ttk.Label(parent, text=label, style="FieldLabel.TLabel").grid(
-            row=row, column=0, sticky="w", pady=7
-        )
+        label_frame = ttk.Frame(parent, style="Surface.TFrame")
+        label_frame.grid(row=row, column=0, sticky="w", pady=7)
+        ttk.Label(label_frame, text=label, style="FieldLabel.TLabel").pack(side=tk.LEFT)
+        if help_text:
+            self._help_button(label_frame, help_text).pack(side=tk.LEFT, padx=(5, 0))
         entry = ttk.Entry(parent, textvariable=variable)
         entry.grid(row=row, column=1, sticky="ew", padx=(14, 0), pady=7)
         return entry
+
+    def _help_button(self, parent: tk.Misc, text: str) -> ttk.Button:
+        button = ttk.Button(parent, text="?", style="Help.TButton", width=2, takefocus=True)
+        self.help_tooltips.append(HelpTooltip(button, text))
+        return button
 
     def _accordion(
         self,
@@ -898,6 +1111,9 @@ class DesktopApp:
             self.advanced_toggle_btn.configure(text="Mostrar panel")
 
     def _show_page(self, destination: str) -> None:
+        for tooltip in self.help_tooltips:
+            tooltip.pinned = False
+            tooltip.hide()
         page = self.pages[destination]
         page.tkraise()
         titles = dict(NAV_ITEMS)
@@ -1236,6 +1452,21 @@ class DesktopApp:
     def _update_endpoint_url(self) -> None:
         display_host = self.config.host if self.config.host != "0.0.0.0" else get_local_ip()
         self.full_url_var.set(f"https://{display_host}:{self.config.port}")
+        self.certificate_url_var.set(
+            certificate_portal_url(
+                self.config.host,
+                certificate_http_port(self.config.port),
+                display_host,
+            )
+        )
+        self.printer_route_var.set(
+            printer_route_label(
+                self.config.printer_host,
+                self.config.printer_port,
+                self.config.usb_bridge_enabled,
+                self.config.usb_bridge_port,
+            )
+        )
 
     def _active_api_endpoint(self) -> tuple[str, int]:
         server = self.controller.server
@@ -1247,6 +1478,11 @@ class DesktopApp:
         self.root.clipboard_clear()
         self.root.clipboard_append(self.api_key_var.get())
         messagebox.showinfo("Copiado", "API Key copiada al portapapeles")
+
+    def _copy_certificate_url(self) -> None:
+        self.root.clipboard_clear()
+        self.root.clipboard_append(self.certificate_url_var.get())
+        messagebox.showinfo("Copiado", "URL del portal copiada al portapapeles")
 
     def _do_exit(self) -> None:
         if self._closing:
@@ -1370,7 +1606,7 @@ class DesktopApp:
         fingerprint = certificate_sha256_fingerprint(ca_path)
         host, port = self._active_api_endpoint()
         display_host = host if host != "0.0.0.0" else get_local_ip()
-        portal_url = f"http://{display_host}:{certificate_http_port(port)}/certificado"
+        portal_url = certificate_portal_url(host, certificate_http_port(port), display_host)
         logging.info("Abriendo portal público de certificado: %s", portal_url)
         messagebox.showinfo(
             "Huella del certificado Moviu",
@@ -1576,6 +1812,14 @@ class DesktopApp:
         style.map("Outline.TButton", background=[("active", "#173453")])
         style.configure("Link.TButton", background=surface, foreground="#72a8ff", padding=(6, 3))
         style.map("Link.TButton", background=[("active", surface)], foreground=[("active", "#a4c8ff")])
+        style.configure(
+            "Help.TButton",
+            background="#173453",
+            foreground="#a4c8ff",
+            padding=(2, 0),
+            font=("Segoe UI Semibold", 8),
+        )
+        style.map("Help.TButton", background=[("active", "#204674")])
         style.configure("Nav.TButton", background=sidebar, foreground="#a6b6c9", anchor="w", padding=(12, 10))
         style.map("Nav.TButton", background=[("active", "#102a46")], foreground=[("active", text)])
         style.configure("NavActive.TButton", background="#173a69", foreground="#ffffff", anchor="w", padding=(12, 10))

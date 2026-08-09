@@ -14,7 +14,49 @@ NAV_ITEMS = (
     ("connection", "Conexión"),
     ("activity", "Actividad"),
     ("settings", "Configuración"),
+    ("help", "Ayuda"),
 )
+
+
+def certificate_portal_url(api_host: str, portal_port: int, local_ip: str) -> str:
+    """Return the client-facing URL for the HTTP certificate portal."""
+
+    display_host = local_ip if api_host == "0.0.0.0" else api_host
+    return f"http://{display_host}:{portal_port}/certificado"
+
+
+def printer_route_label(
+    printer_host: str,
+    printer_port: int,
+    bridge_enabled: bool,
+    bridge_port: int,
+) -> str:
+    """Describe whether the default printer points to the local USB bridge."""
+
+    is_local = printer_host.strip().lower() in {"127.0.0.1", "localhost"}
+    if is_local and printer_port == bridge_port:
+        return "Puente USB local" if bridge_enabled else "Ruta local; habilita el puente USB"
+    return "Impresora de red"
+
+
+def tooltip_coordinates(
+    anchor_x: int,
+    anchor_y: int,
+    anchor_width: int,
+    tooltip_width: int,
+    tooltip_height: int,
+    screen_width: int,
+    screen_height: int,
+    margin: int = 8,
+) -> tuple[int, int]:
+    """Position a tooltip beside its anchor while keeping it on-screen."""
+
+    x = anchor_x + anchor_width + margin
+    if x + tooltip_width + margin > screen_width:
+        x = anchor_x - tooltip_width - margin
+    x = max(margin, min(x, screen_width - tooltip_width - margin))
+    y = max(margin, min(anchor_y, screen_height - tooltip_height - margin))
+    return x, y
 
 
 @dataclass(frozen=True)
