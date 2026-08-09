@@ -10,6 +10,7 @@ from .config import VERSION
 
 GITHUB_REPO = "dancoLgh/moviu"
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+WEBSITE_DOWNLOAD_URL = "https://dancolgh.github.io/moviu/#descargas"
 
 logger = logging.getLogger(__name__)
 
@@ -46,14 +47,14 @@ def check_for_updates(token: Optional[str] = None) -> tuple[bool, Optional[str],
         current_parts = [int(p) for p in current_tag.split(".")]
         
         if latest_parts > current_parts:
-            return True, f"v{latest_tag}", info.get("html_url")
+            return True, f"v{latest_tag}", WEBSITE_DOWNLOAD_URL
     except ValueError:
         # Fallback to string comparison if not numeric
         if latest_tag != current_tag:
-            return True, f"v{latest_tag}", info.get("html_url")
+            return True, f"v{latest_tag}", WEBSITE_DOWNLOAD_URL
             
     return False, VERSION, None
 
 def open_release_page(url: str):
-    """Open the GitHub release page in the system browser."""
+    """Open the supplied download page in the system browser."""
     webbrowser.open(url)

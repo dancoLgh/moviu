@@ -12,6 +12,7 @@ Todos los cambios notables en este proyecto serán documentados en este archivo.
 ### Mejorado
 - Las configuraciones nuevas usan `127.0.0.1` como destino de impresión predeterminado para facilitar el uso del puente USB local.
 - El panel de inicio identifica si el destino apunta al puente USB local o a una impresora de red.
+- El aviso de actualización dirige a la sección de descargas del sitio de Moviu.
 - El sitio del proyecto incorpora iconografía consistente, una historia de integración con Odoo y el flujo opcional de aportes mediante dLocal Go.
 
 ## [1.1.0] - 2026-08-07
