@@ -11,6 +11,7 @@
   <meta property="og:url" content="https://dancolgh.github.io/moviu/">
   <title>Moviu Print Server | Impresión local para aplicaciones web</title>
   <link rel="stylesheet" href="styles.css">
+  <script src="download-modal-core.js" defer></script>
   <script src="script.js" defer></script>
 </head>
 <body>
@@ -315,7 +316,7 @@
               <h3>Windows</h3>
               <p>x86-64 · Aplicación de escritorio</p>
             </div>
-            <a class="button button-primary" href="https://github.com/dancoLgh/moviu/releases/latest/download/MoviuPrintServer-Windows-x86_64.exe">Descargar .exe <span>↓</span></a>
+            <a class="button button-primary" data-download data-platform="Windows" href="https://github.com/dancoLgh/moviu/releases/latest/download/MoviuPrintServer-Windows-x86_64.exe">Descargar .exe <span>↓</span></a>
           </article>
           <article class="download-card reveal">
             <span class="platform-icon linux-icon" aria-hidden="true">⌁</span>
@@ -323,7 +324,7 @@
               <h3>Linux</h3>
               <p>x86-64 · Binario ejecutable</p>
             </div>
-            <a class="button button-secondary" href="https://github.com/dancoLgh/moviu/releases/latest/download/MoviuPrintServer-Linux-x86_64">Descargar <span>↓</span></a>
+            <a class="button button-secondary" data-download data-platform="Linux" href="https://github.com/dancoLgh/moviu/releases/latest/download/MoviuPrintServer-Linux-x86_64">Descargar <span>↓</span></a>
           </article>
           <article class="download-card reveal">
             <span class="platform-icon source-icon" aria-hidden="true">&lt;/&gt;</span>
@@ -338,6 +339,45 @@
       </div>
     </section>
   </main>
+
+  <div class="download-modal" data-download-modal hidden>
+    <div class="download-modal-backdrop" data-download-close></div>
+    <section class="download-dialog" role="dialog" aria-modal="true" aria-labelledby="download-dialog-title" aria-describedby="download-dialog-description">
+      <button class="download-dialog-close" type="button" data-download-close aria-label="Cerrar ventana">×</button>
+      <div class="download-dialog-mark" aria-hidden="true">
+        <svg viewBox="0 0 48 48">
+          <path d="M6 11.5a4 4 0 0 1 6.4-3.2L24 17l11.6-8.7A4 4 0 0 1 42 11.5V35a4 4 0 0 1-4 4h-7l-7-12-7 12H10a4 4 0 0 1-4-4Z"/>
+        </svg>
+      </div>
+      <span class="download-dialog-kicker">DESCARGA PREPARADA</span>
+      <h2 id="download-dialog-title">Gracias por descargar Moviu</h2>
+      <p id="download-dialog-description" class="download-countdown-copy">
+        Moviu para <strong data-download-platform>tu plataforma</strong> comenzará a descargarse en
+        <strong><span data-download-countdown>3</span> s</strong>.
+      </p>
+      <div class="download-progress" aria-hidden="true"><span data-download-progress></span></div>
+
+      <div class="download-support">
+        <p>Si Moviu te resulta útil, podés apoyar el proyecto:</p>
+        <div class="donation-amounts" aria-label="Elegir monto de donación">
+          <button type="button" data-donation-amount="5">USD 5</button>
+          <button type="button" data-donation-amount="10" class="active" aria-pressed="true">USD 10</button>
+          <button type="button" data-donation-amount="20">USD 20</button>
+          <button type="button" data-donation-amount="100">USD 100</button>
+        </div>
+        <div class="dlocal-checkouts" data-dlocal-checkouts aria-live="polite">
+          <div id="dlocal-checkout-5" class="dlocal-checkout" data-dlocal-amount="5" data-reference-id="e6e6ba5e-26c2-4858-86cb-d0f32c3fe2a8" hidden></div>
+          <div id="dlocal-checkout-10" class="dlocal-checkout" data-dlocal-amount="10" data-reference-id="1e2916bb-1653-45fb-a5b8-6a1c0c5a3aa1"></div>
+          <div id="dlocal-checkout-20" class="dlocal-checkout" data-dlocal-amount="20" data-reference-id="3df46a75-0968-47dd-96c1-725b50a91ba9" hidden></div>
+          <div id="dlocal-checkout-100" class="dlocal-checkout" data-dlocal-amount="100" data-reference-id="e6c7e9fc-fce3-4d9c-b922-2abaf84001ee" hidden></div>
+          <span class="dlocal-status" data-dlocal-status>Cargando pago seguro...</span>
+        </div>
+        <small>La donación es opcional y se procesa de forma segura mediante dLocal Go.</small>
+      </div>
+
+      <a class="download-direct-link" data-download-direct href="#">¿La descarga no comenzó? Descargar ahora</a>
+    </section>
+  </div>
 
   <footer class="site-footer">
     <div class="section-inner footer-grid">
