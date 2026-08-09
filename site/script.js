@@ -17,11 +17,22 @@ const DLOCAL_GO_SCRIPT = "https://static.dlocalgo.com/dlocalgo.min.js";
 const DLOCAL_GO_CHECKOUT_ID = "DKGuMAOMKKGaGHsreDzGCdYmGjNMCJKs";
 const initializedDonationAmounts = new Set();
 const downloadScheduler = window.MoviuDownload.createDownloadScheduler();
-let dlocalGoPromise;
 let activeDownloadJob;
 let lastManualDownloadAt = 0;
 let previousFocus;
 let modalBackgroundState = [];
+
+function getDlocalGoConstructor() {
+  if (typeof DlocalGo === "function") return DlocalGo;
+  if (typeof window.DlocalGo === "function") return window.DlocalGo;
+  return null;
+}
+
+const dlocalGoLoader = window.MoviuDownload.createExternalScriptLoader({
+  documentObject: document,
+  src: DLOCAL_GO_SCRIPT,
+  resolveValue: getDlocalGoConstructor,
+});
 
 function updateHeader() {
   header?.classList.toggle("scrolled", window.scrollY > 12);
@@ -62,50 +73,7 @@ copyButton?.addEventListener("click", async () => {
 });
 
 function loadDlocalGo() {
-  if (window.DlocalGo) {
-    return Promise.resolve(window.DlocalGo);
-  }
-  if (dlocalGoPromise) {
-    return dlocalGoPromise;
-  }
-
-  dlocalGoPromise = new Promise((resolve, reject) => {
-    const existingScript = document.querySelector(`script[src="${DLOCAL_GO_SCRIPT}"]`);
-    const script = existingScript || document.createElement("script");
-    const timeout = window.setTimeout(
-      () => handleFailure(new Error("dLocal Go tardó demasiado en responder")),
-      10000
-    );
-    const cleanup = () => {
-      window.clearTimeout(timeout);
-      script.removeEventListener("load", handleLoad);
-      script.removeEventListener("error", handleError);
-    };
-    const handleLoad = () => {
-      if (window.DlocalGo) {
-        cleanup();
-        resolve(window.DlocalGo);
-      } else {
-        handleFailure(new Error("dLocal Go no quedó disponible"));
-      }
-    };
-    const handleError = () => handleFailure(new Error("No se pudo cargar dLocal Go"));
-    function handleFailure(error) {
-      cleanup();
-      script.remove();
-      dlocalGoPromise = undefined;
-      reject(error);
-    }
-
-    script.addEventListener("load", handleLoad, { once: true });
-    script.addEventListener("error", handleError, { once: true });
-    if (!existingScript) {
-      script.src = DLOCAL_GO_SCRIPT;
-      script.async = true;
-      document.body.appendChild(script);
-    }
-  });
-  return dlocalGoPromise;
+  return dlocalGoLoader.load();
 }
 
 async function showDonationAmount(amount) {

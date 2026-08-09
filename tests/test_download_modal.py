@@ -31,8 +31,13 @@ class DownloadDonationModalTests(unittest.TestCase):
         self.assertIn("https://static.dlocalgo.com/dlocalgo.min.js", self.script)
         self.assertIn("DKGuMAOMKKGaGHsreDzGCdYmGjNMCJKs", self.script)
         self.assertIn("new DlocalGo", self.script)
+        self.assertIn('typeof DlocalGo === "function"', self.script)
         self.assertIn('currency: "USD"', self.script)
         self.assertIn("normalizeDonationAmount(amount)", self.script)
+
+    def test_site_declares_a_local_favicon(self):
+        self.assertIn('rel="icon" href="favicon.svg"', self.html)
+        self.assertTrue((SITE / "favicon.svg").is_file())
 
     def test_download_is_not_conditional_on_donation(self):
         self.assertIn("createDownloadScheduler", self.script)
