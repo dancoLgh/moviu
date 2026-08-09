@@ -952,9 +952,15 @@ h1 span {
 
 .story-grid {
   display: grid;
-  grid-template-columns: .85fr 1.15fr;
+  grid-template-columns: .7fr 1.3fr;
   align-items: center;
-  gap: 110px;
+  gap: 80px;
+}
+
+.story-copy h2 {
+  max-width: 700px;
+  font-size: clamp(36px, 3.7vw, 50px);
+  text-wrap: balance;
 }
 
 .story-mark {
@@ -1022,65 +1028,150 @@ h1 span {
 
 .story-odoo {
   display: grid;
+  position: relative;
   margin-top: 26px;
-  padding: 18px;
-  border: 1px solid rgba(88, 166, 255, .25);
-  border-radius: 13px;
+  padding: 24px;
+  overflow: hidden;
+  border: 1px solid #2b4d73;
+  border-radius: 16px;
   grid-template-columns: auto 1fr;
-  gap: 14px;
-  background: linear-gradient(135deg, rgba(18, 52, 93, .58), rgba(11, 29, 52, .72));
+  gap: 18px;
+  background: linear-gradient(135deg, rgba(19, 50, 87, .9), rgba(9, 27, 48, .94));
+  box-shadow: 0 20px 55px rgba(0, 0, 0, .2), inset 0 1px rgba(255, 255, 255, .04);
+}
+
+.story-odoo::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 3px;
+  background: linear-gradient(var(--blue-light), var(--cyan));
+  content: "";
+}
+
+.story-odoo::after {
+  position: absolute;
+  top: -90px;
+  right: -80px;
+  width: 230px;
+  height: 230px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(8, 207, 232, .12), transparent 68%);
+  content: "";
+  pointer-events: none;
 }
 
 .story-odoo-icon {
   display: grid;
-  width: 42px;
-  height: 42px;
-  border-radius: 10px;
+  position: relative;
+  z-index: 1;
+  width: 48px;
+  height: 48px;
+  border: 1px solid #35649a;
+  border-radius: 12px;
   place-items: center;
-  background: #12345d;
-  color: #82b8ff;
+  background: linear-gradient(145deg, #1a4f8f, #12345d);
+  color: #a5caff;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, .2);
 }
 
 .story-odoo-icon .lucide {
-  width: 21px;
-  height: 21px;
+  width: 23px;
+  height: 23px;
 }
 
-.story-odoo strong {
+.story-odoo-content {
+  position: relative;
+  z-index: 1;
+}
+
+.story-odoo-kicker {
   display: block;
-  margin-bottom: 5px;
+  margin-bottom: 7px;
+  color: #6faeff;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .13em;
+}
+
+.story-odoo h3 {
+  max-width: 520px;
+  margin: 0 0 8px;
   color: var(--text);
-  font-size: 15px;
+  font-size: 21px;
+  letter-spacing: -.025em;
+  line-height: 1.2;
 }
 
 .story-odoo p {
-  margin-bottom: 10px;
-  color: #9fb0c4;
+  max-width: 600px;
+  margin-bottom: 18px;
+  color: #aebed0;
   font-size: 14px !important;
-  line-height: 1.55;
+  line-height: 1.6;
 }
 
-.story-odoo a {
-  display: inline-flex;
+.story-odoo-contact {
+  display: flex;
   align-items: center;
-  gap: 7px;
-  color: #76adff;
-  font-size: 13px;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+}
+
+.story-odoo-contact a {
+  display: inline-flex;
+  min-height: 46px;
+  padding: 8px 11px;
+  border: 1px solid rgba(88, 166, 255, .45);
+  border-radius: 8px;
+  align-items: center;
+  gap: 10px;
+  background: rgba(18, 52, 93, .62);
+  color: #c6ddff;
+  font-size: 12px;
   font-weight: 700;
+  transition: background .2s ease, border-color .2s ease, transform .2s ease;
 }
 
-.story-odoo a:hover {
-  color: #acd0ff;
+.story-odoo-contact a > span {
+  display: grid;
+  gap: 1px;
 }
 
-.story-odoo a .lucide {
+.story-odoo-contact a b {
+  color: #d9e8fb;
+  font-size: 12px;
+}
+
+.story-odoo-contact a small {
+  color: #aebfd2;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.story-odoo-contact a:hover,
+.story-odoo-contact a:focus-visible {
+  border-color: #68a7f6;
+  background: #173f70;
+  transform: translateY(-1px);
+}
+
+.story-odoo-contact a .lucide {
   width: 15px;
   height: 15px;
 }
 
+.story-odoo-contact a .lucide:last-child {
+  margin-left: 2px;
+}
+
 .story-values {
   display: flex;
-  margin-top: 33px;
+  margin-top: 26px;
+  padding-top: 20px;
+  border-top: 1px solid rgba(88, 166, 255, .12);
   flex-wrap: wrap;
   gap: 20px;
 }
@@ -1648,6 +1739,17 @@ body.modal-open {
   transform: translateY(0);
 }
 
+@media (max-width: 1240px) {
+  .story-grid {
+    grid-template-columns: 1fr;
+    gap: 60px;
+  }
+
+  .story-mark {
+    min-height: 380px;
+  }
+}
+
 @media (max-width: 1120px) {
   .hero-grid {
     grid-template-columns: 1fr;
@@ -1788,6 +1890,32 @@ body.modal-open {
 
   .donation-amounts {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .story-odoo {
+    padding: 20px;
+    grid-template-columns: 1fr;
+  }
+
+  .story-odoo-icon {
+    width: 42px;
+    height: 42px;
+  }
+
+  .story-odoo h3 {
+    font-size: 19px;
+  }
+
+  .story-odoo-contact {
+    align-items: stretch;
+  }
+
+  .story-odoo-contact a {
+    width: 100%;
+  }
+
+  .story-odoo-contact a .lucide:last-child {
+    margin-left: auto;
   }
 
   .header-inner,

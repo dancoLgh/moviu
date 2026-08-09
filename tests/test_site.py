@@ -75,11 +75,16 @@ class GitHubPagesTest(unittest.TestCase):
         self.assertIn("sin depender de odoo iot", plain_text)
         self.assertIn("punto de venta", plain_text)
         self.assertIn("back office", plain_text)
-        self.assertIn("addons que conectan esos flujos con moviu", plain_text)
+        self.assertIn("addons que conectan el punto de venta", plain_text)
+        self.assertIn("con moviu para imprimir directamente", plain_text)
 
     def test_odoo_addons_contact_is_available(self) -> None:
-        self.assertIn("mailto:daniel@dawnpy.com", self.parser.links)
-        self.assertIn('data-lucide="puzzle"', self.html)
+        story_contact = self.html.split('class="story-odoo-contact"', 1)[1].split("</div>", 1)[0]
+
+        self.assertIn('href="mailto:daniel@dawnpy.com"', story_contact)
+        self.assertIn("Consultar por los addons", story_contact)
+        self.assertIn("daniel@dawnpy.com", story_contact)
+        self.assertIn('data-lucide="boxes"', self.html)
         self.assertIn('data-lucide="mail"', self.html)
 
     def test_pages_workflow_deploys_site_directory(self) -> None:
