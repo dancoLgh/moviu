@@ -34,6 +34,7 @@ class PrintJob:
     auto_cut: bool = True
     code_page: Optional[str] = None
     gamma: Optional[int] = None
+    cut_margin_lines: Optional[int] = None
 
 
 class PrinterError(RuntimeError):
@@ -64,12 +65,14 @@ class PrintProcessor:
         width: int = 576,
         gamma: int = 500,
         simulate: bool = False,
+        cut_margin_lines: int = 2,
     ) -> None:
         self.default_host = default_host
         self.default_port = default_port
         self.width = width
         self.gamma_config = gamma
         self.simulate = simulate
+        self.cut_margin_lines = cut_margin_lines
 
     def _get_actual_gamma(self, user_gamma: Optional[int]) -> float:
         """Convert user-friendly range (200-1000) to actual log-gamma (10.0-0.01).
@@ -210,7 +213,17 @@ class PrintProcessor:
             raise PrinterError(f"Modo no soportado: {job.mode}")
         
         gamma = self._get_actual_gamma(job.gamma)
-        return image_to_escpos(image, gamma=gamma), preview
+        cut_margin_lines = (
+            job.cut_margin_lines
+            if job.cut_margin_lines is not None
+            else self.cut_margin_lines
+        )
+        return image_to_escpos(
+            image,
+            gamma=gamma,
+            cut=job.auto_cut,
+            cut_margin_lines=cut_margin_lines,
+        ), preview
 
     @staticmethod
     def _decode_raw(content: str) -> bytes:

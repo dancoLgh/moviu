@@ -127,6 +127,12 @@ class PrintRequest(BaseModel):
     gamma: Optional[int] = Field(
         None, description="Ajuste de oscuridad 200 (claro) a 1000 (muy oscuro). Default: 500"
     )
+    cut_margin_lines: Optional[int] = Field(
+        None,
+        ge=0,
+        le=20,
+        description="Líneas de avance antes del corte generado por Moviu en html, image o PDF térmico. Usa la configuración global por defecto.",
+    )
 
 
 class PrintResponse(BaseModel):
@@ -150,6 +156,7 @@ def create_api(config: AppConfig) -> FastAPI:
         config.printer_port,
         width=config.printer_width,
         gamma=config.printer_gamma,
+        cut_margin_lines=config.cut_margin_lines,
         simulate=config.simulate_printer,
     )
 
@@ -287,6 +294,7 @@ def create_api(config: AppConfig) -> FastAPI:
             printer_name=resolved_local_printer,
             code_page=request.code_page,
             gamma=request.gamma,
+            cut_margin_lines=request.cut_margin_lines,
         )
         try:
             result = processor.process(job, simulate_override=simulate)

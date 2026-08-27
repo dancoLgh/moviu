@@ -2,6 +2,15 @@
 
 Todos los cambios notables en este proyecto serán documentados en este archivo.
 
+## [1.3.0] - 2026-08-27
+
+### Añadido
+- Margen configurable de 0 a 20 líneas antes del corte ESC/POS para evitar cortar el contenido demasiado al ras.
+- Opción `cut_margin_lines` en la API para ajustar el margen de corte por trabajo.
+
+### Mejorado
+- La configuración de la aplicación se valida por completo antes de modificar o guardar los valores activos.
+
 ## [1.2.0] - 2026-08-09
 
 ### Añadido

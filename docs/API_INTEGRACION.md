@@ -46,6 +46,9 @@
 | `paper_height_mm` | float | Para `pdf` con `printer.name` y `raw_mode=false`: alto personalizado en mm (requiere `paper_width_mm`) |
 | `raw_mode` | bool | Para `pdf` con `printer.name`: enviar PDF directo sin renderizar |
 | `simulate` | bool | Forzar simulación (no enviar a impresora física) |
+| `cut_margin_lines` | int | Líneas de avance antes del corte generado por Moviu, de 0 a 20 (opcional; usa la configuración global por defecto) |
+
+`cut_margin_lines` solo se aplica a los cortes que Moviu genera al rasterizar `html`, `image` o un PDF enviado a una térmica ESC/POS. Los modos `raw`, `raw_text`, `hybrid` y `zpl` conservan íntegramente los comandos enviados por el cliente. El valor global se configura en **Impresoras > Papel y renderizado > Margen antes del corte**, se guarda como `cut_margin_lines` y por defecto es de 2 líneas; la distancia física de cada línea depende de la impresora.
 
 ### PrintResponse
 
@@ -120,7 +123,7 @@ Descubrir servidores Moviu en la red local (mDNS). **No requiere autenticación.
       "name": "Moviu Print Server._moviu-print._tcp.local.",
       "port": 9000,
       "addresses": ["192.168.1.156"],
-      "properties": {"version": "1.2.0", "api_version": "1.0", "protocol": "https"}
+      "properties": {"version": "1.3.0", "api_version": "1.0", "protocol": "https"}
     }
   ],
   "count": 1

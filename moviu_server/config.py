@@ -10,7 +10,7 @@ from typing import Optional
 
 CONFIG_DIR = Path.home() / ".moviu_printer"
 CONFIG_FILE = CONFIG_DIR / "config.json"
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 
 
 @dataclass
@@ -24,6 +24,7 @@ class AppConfig:
     printer_port: int = 9100
     printer_width: int = 576
     printer_gamma: int = 500
+    cut_margin_lines: int = 2
     simulate_printer: bool = False
     auto_start: bool = False
     usb_bridge_enabled: bool = False
@@ -38,6 +39,9 @@ class AppConfig:
     def from_dict(cls, data: Optional[dict]) -> "AppConfig":
         data = data or {}
         host = data.get("host", cls.host)
+        cut_margin_lines = int(data.get("cut_margin_lines", cls.cut_margin_lines))
+        if not 0 <= cut_margin_lines <= 20:
+            cut_margin_lines = cls.cut_margin_lines
         # Migrate 127.0.0.1 to 0.0.0.0 to enable network access by default
         if host == "127.0.0.1":
             host = "0.0.0.0"
@@ -50,6 +54,7 @@ class AppConfig:
             printer_port=int(data.get("printer_port", cls.printer_port)),
             printer_width=int(data.get("printer_width", cls.printer_width)),
             printer_gamma=int(data.get("printer_gamma", cls.printer_gamma)),
+            cut_margin_lines=cut_margin_lines,
             simulate_printer=bool(data.get("simulate_printer", cls.simulate_printer)),
             auto_start=bool(data.get("auto_start", cls.auto_start)),
             usb_bridge_enabled=bool(data.get("usb_bridge_enabled", cls.usb_bridge_enabled)),

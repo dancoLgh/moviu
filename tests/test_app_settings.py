@@ -25,6 +25,7 @@ def make_app(server_running: bool) -> DesktopApp:
     app.printer_port_var = Value("9100")
     app.printer_width_var = Value("384 (58mm)")
     app.printer_gamma_var = Value(600)
+    app.cut_margin_lines_var = Value("5")
     app.simulate_var = Value(True)
     app.auto_start_var = Value(False)
     app.bridge_enabled_var = Value(False)
@@ -57,6 +58,7 @@ class SaveSettingsTests(unittest.TestCase):
 
         self.assertEqual(app.config.port, 9001)
         self.assertEqual(app.config.printer_width, 384)
+        self.assertEqual(app.config.cut_margin_lines, 5)
         save_config.assert_called_once_with(app.config)
         app.stop_server.assert_called_once_with()
         app.start_server.assert_called_once_with()
@@ -73,6 +75,20 @@ class SaveSettingsTests(unittest.TestCase):
         app.stop_server.assert_not_called()
         app.start_server.assert_not_called()
         app._update_endpoint_url.assert_called_once_with()
+
+    @patch("moviu_server.app.messagebox.showerror")
+    @patch("moviu_server.app.save_config")
+    def test_invalid_cut_margin_does_not_mutate_configuration(self, save_config, showerror):
+        app = make_app(server_running=False)
+        app.host_var = Value("192.168.1.10")
+        app.cut_margin_lines_var = Value("21")
+
+        self.assertFalse(app.save_settings())
+
+        self.assertEqual(app.config.cut_margin_lines, 2)
+        self.assertEqual(app.config.host, "0.0.0.0")
+        save_config.assert_not_called()
+        showerror.assert_called_once()
 
     @patch("moviu_server.app.messagebox.showerror")
     @patch("moviu_server.app.messagebox.showinfo")

@@ -8,8 +8,17 @@ from typing import Iterable
 from PIL import Image
 
 
-def image_to_escpos(image: Image.Image, cut: bool = True, chunk_height: int = 64, gamma: float = 1.0) -> bytes:
+def image_to_escpos(
+    image: Image.Image,
+    cut: bool = True,
+    chunk_height: int = 64,
+    gamma: float = 1.0,
+    cut_margin_lines: int = 2,
+) -> bytes:
     """Convert a Pillow image into ESC/POS raster bytes using intelligent chunking."""
+
+    if not 0 <= cut_margin_lines <= 20:
+        raise ValueError("cut_margin_lines debe estar entre 0 y 20")
 
     # Handle transparency: composite onto a white background to avoid black blobs
     if image.mode in ("RGBA", "LA") or (image.mode == "P" and "transparency" in image.info):
@@ -59,7 +68,8 @@ def image_to_escpos(image: Image.Image, cut: bool = True, chunk_height: int = 64
                 payload.append(byte)
     
     if cut:
-        payload.extend(b"\n\n\x1dV0")  # Feed and cut
+        payload.extend(b"\n" * cut_margin_lines)
+        payload.extend(b"\x1dV0")  # Full cut
     
     return bytes(payload)
 

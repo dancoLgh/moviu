@@ -344,6 +344,7 @@ class DesktopApp:
         self.printer_port_var = tk.StringVar(value=str(self.config.printer_port))
         self.printer_width_var = tk.StringVar(value=str(self.config.printer_width))
         self.printer_gamma_var = tk.IntVar(value=self.config.printer_gamma)
+        self.cut_margin_lines_var = tk.StringVar(value=str(self.config.cut_margin_lines))
         self.printer_gamma_str = tk.StringVar(value=str(self.config.printer_gamma))
         
         def _update_gamma_str(*args):
@@ -674,11 +675,24 @@ class DesktopApp:
         ttk.Label(rendering, textvariable=self.printer_gamma_str, width=4).grid(
             row=2, column=2, sticky="e"
         )
+        ttk.Label(rendering, text="Margen antes del corte", style="FieldLabel.TLabel").grid(
+            row=3, column=0, sticky="w", pady=7
+        )
+        ttk.Spinbox(
+            rendering,
+            textvariable=self.cut_margin_lines_var,
+            from_=0,
+            to=20,
+            width=6,
+        ).grid(row=3, column=1, sticky="w", padx=(14, 0), pady=7)
+        ttk.Label(rendering, text="líneas", style="Muted.TLabel").grid(
+            row=3, column=2, sticky="w", pady=7
+        )
         ttk.Checkbutton(
             rendering,
             text="Simular impresora y guardar trabajos localmente",
             variable=self.simulate_var,
-        ).grid(row=3, column=0, columnspan=3, sticky="w", pady=(14, 4))
+        ).grid(row=4, column=0, columnspan=3, sticky="w", pady=(14, 4))
 
         footer = self._card(page, padding=(16, 12))
         footer.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(12, 0))
@@ -1237,37 +1251,55 @@ class DesktopApp:
     def save_settings(self, notify: bool = True, restart_running: bool = True) -> bool:
         server_was_running = bool(self.controller.thread and self.controller.thread.is_alive())
         try:
-            self.config.host = self.host_var.get()
-            self.config.port = int(self.port_var.get())
-            portal_port = certificate_http_port(self.config.port)
-            self.config.printer_host = self.printer_host_var.get()
-            self.config.printer_port = int(self.printer_port_var.get())
+            host = self.host_var.get()
+            port = int(self.port_var.get())
+            portal_port = certificate_http_port(port)
+            printer_host = self.printer_host_var.get()
+            printer_port = int(self.printer_port_var.get())
             
             # Parse printer width
             width_str = self.printer_width_var.get()
             # Extract number if it contains text (e.g. "576 (80mm)")
             match = re.search(r"^\d+", width_str)
             if match:
-                self.config.printer_width = int(match.group(0))
+                printer_width = int(match.group(0))
             else:
-                self.config.printer_width = int(width_str)
+                printer_width = int(width_str)
 
-            self.config.printer_gamma = int(self.printer_gamma_var.get())
-            self.config.simulate_printer = self.simulate_var.get()
-            self.config.auto_start = self.auto_start_var.get()
-            self.config.usb_bridge_enabled = self.bridge_enabled_var.get()
-            self.config.usb_bridge_port = int(self.bridge_port_var.get())
+            printer_gamma = int(self.printer_gamma_var.get())
+            cut_margin_lines = int(self.cut_margin_lines_var.get())
+            if not 0 <= cut_margin_lines <= 20:
+                raise ValueError("El margen antes del corte debe estar entre 0 y 20 líneas")
+            simulate_printer = self.simulate_var.get()
+            auto_start = self.auto_start_var.get()
+            usb_bridge_enabled = self.bridge_enabled_var.get()
+            usb_bridge_port = int(self.bridge_port_var.get())
             instance_port = getattr(self, "instance_port", 29170)
-            if self.config.port == instance_port or portal_port == instance_port:
+            if port == instance_port or portal_port == instance_port:
                 raise ValueError("El puerto está reservado para el control interno de Moviu")
-            if self.config.usb_bridge_enabled and self.config.usb_bridge_port in {
-                self.config.port,
+            if usb_bridge_enabled and usb_bridge_port in {
+                port,
                 portal_port,
             }:
                 raise ValueError("El puerto del puente coincide con un puerto del servidor")
-            self.config.usb_bridge_printer = self.bridge_printer_var.get()
-            self.config.usb_bridge_autostart = self.bridge_autostart_var.get()
-            self.config.github_token = self.github_token_var.get()
+            usb_bridge_printer = self.bridge_printer_var.get()
+            usb_bridge_autostart = self.bridge_autostart_var.get()
+            github_token = self.github_token_var.get()
+
+            self.config.host = host
+            self.config.port = port
+            self.config.printer_host = printer_host
+            self.config.printer_port = printer_port
+            self.config.printer_width = printer_width
+            self.config.printer_gamma = printer_gamma
+            self.config.cut_margin_lines = cut_margin_lines
+            self.config.simulate_printer = simulate_printer
+            self.config.auto_start = auto_start
+            self.config.usb_bridge_enabled = usb_bridge_enabled
+            self.config.usb_bridge_port = usb_bridge_port
+            self.config.usb_bridge_printer = usb_bridge_printer
+            self.config.usb_bridge_autostart = usb_bridge_autostart
+            self.config.github_token = github_token
             save_config(self.config)
             self._apply_autostart(self.config.auto_start, notify=notify)
             if restart_running and server_was_running:
@@ -1290,8 +1322,8 @@ class DesktopApp:
                 messagebox.showinfo("Configuración", detail)
             logging.info("Configuración guardada")
             return True
-        except ValueError:
-            messagebox.showerror("Error", "Puerto inválido")
+        except ValueError as exc:
+            messagebox.showerror("Error", f"Configuración inválida: {exc}")
             return False
 
     def regenerate_api_key(self) -> None:
