@@ -6,11 +6,13 @@ from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlparse
 
-from moviu_server.config import VERSION
-
-
 ROOT = Path(__file__).resolve().parents[1]
 SITE = ROOT / "site"
+CONFIG = (ROOT / "moviu_server" / "config.py").read_text(encoding="utf-8")
+VERSION_MATCH = re.search(r'^VERSION = "([^"]+)"$', CONFIG, re.MULTILINE)
+if VERSION_MATCH is None:
+    raise RuntimeError("Could not read VERSION from moviu_server/config.py")
+VERSION = VERSION_MATCH.group(1)
 
 
 class SiteParser(HTMLParser):
