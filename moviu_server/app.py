@@ -62,6 +62,9 @@ from .updater import (
     self_update_support,
 )
 
+CHANGELOG_PATH = Path(__file__).resolve().parent.parent / "CHANGELOG.md"
+RELEASES_URL = "https://github.com/dancoLgh/moviu/releases"
+
 
 def _suppress_windows_connection_reset_noise() -> None:
     """Ignore benign WinError 10054 raised while closing HTTPS connections."""
@@ -1362,34 +1365,15 @@ class DesktopApp:
             self._staged_update_path = None
 
     def _show_changelog(self) -> None:
-        """Fetch latest notes from GitHub or fall back to local CHANGELOG.md."""
-        def _fetch():
-            from .updater import get_latest_release_info
-            info = get_latest_release_info(self.config.github_token)
-            
-            if info and info.get("body"):
-                content = info["body"]
-                title = f"Novedades - {info.get('tag_name', 'Última Versión')}"
-                self._queue_ui_callback(lambda: ReleaseNotesDialog(self.root, title, content))
-            else:
-                # Fallback to local file
-                changelog_path = Path(__file__).parent.parent / "CHANGELOG.md"
-                if changelog_path.exists():
-                    try:
-                        content = changelog_path.read_text(encoding="utf-8")
-                        self._queue_ui_callback(
-                            lambda: ReleaseNotesDialog(self.root, "Novedades (Local)", content)
-                        )
-                    except Exception:
-                        self._queue_ui_callback(
-                            lambda: open_release_page("https://github.com/dancoLgh/moviu/releases")
-                        )
-                else:
-                    self._queue_ui_callback(
-                        lambda: open_release_page("https://github.com/dancoLgh/moviu/releases")
-                    )
-        
-        threading.Thread(target=_fetch, daemon=True).start()
+        """Display the complete changelog bundled with this application version."""
+        try:
+            content = CHANGELOG_PATH.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            logging.error("No se pudo leer el historial de cambios: %s", exc)
+            open_release_page(RELEASES_URL)
+            return
+
+        ReleaseNotesDialog(self.root, f"Novedades - v{VERSION.lstrip('v')}", content)
 
     def _create_card(self, parent: ttk.Frame, title: str) -> ttk.Labelframe:
         card = ttk.Labelframe(parent, text=title, style="Card.TLabelframe")

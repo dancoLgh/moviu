@@ -2,6 +2,15 @@
 
 Todos los cambios notables en este proyecto serán documentados en este archivo.
 
+## [1.4.1] - 2026-09-02
+
+### Corregido
+- La ventana de novedades ahora muestra el historial completo incluido con la aplicación en lugar de las notas genéricas de GitHub.
+- Si el historial incluido no está disponible o no puede leerse, la aplicación abre la página de releases como alternativa.
+
+### Mejorado
+- Los GitHub Releases usan el `CHANGELOG.md` completo como notas, tanto al crearlos como al reprocesarlos.
+
 ## [1.4.0] - 2026-09-02
 
 ### Añadido

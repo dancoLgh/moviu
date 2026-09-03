@@ -4,7 +4,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from moviu_server.app import DesktopApp
+from moviu_server.app import CHANGELOG_PATH, DesktopApp, RELEASES_URL
+from moviu_server.config import VERSION
 from moviu_server.updater import WEBSITE_DOWNLOAD_URL
 
 
@@ -37,7 +38,60 @@ class DesktopUpdateFlowTests(unittest.TestCase):
         app._closing = False
         app._queue_ui_callback = MagicMock()
         app._download_and_install_update = MagicMock()
+        app.root = MagicMock()
         return app
+
+    @patch("moviu_server.app.ReleaseNotesDialog")
+    def test_changelog_displays_complete_bundled_history(self, release_notes_dialog):
+        app = self.make_app()
+        content = "# Changelog\n\n## [1.4.0]\n- Actualización\n\n## [1.0.0]\n- Inicial\n"
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            changelog = Path(temp_dir) / "CHANGELOG.md"
+            changelog.write_text(content, encoding="utf-8")
+            with patch("moviu_server.app.CHANGELOG_PATH", changelog):
+                app._show_changelog()
+
+        release_notes_dialog.assert_called_once_with(
+            app.root, f"Novedades - v{VERSION.lstrip('v')}", content
+        )
+
+    def test_changelog_path_points_to_complete_project_history(self):
+        content = CHANGELOG_PATH.read_text(encoding="utf-8")
+
+        self.assertIn(f"## [{VERSION.lstrip('v')}]", content)
+        self.assertIn("## [1.0.0]", content)
+
+    @patch("moviu_server.app.ReleaseNotesDialog")
+    @patch("moviu_server.app.open_release_page")
+    def test_changelog_opens_releases_when_bundled_file_is_missing(
+        self, open_release_page, release_notes_dialog
+    ):
+        app = self.make_app()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            missing = Path(temp_dir) / "CHANGELOG.md"
+            with patch("moviu_server.app.CHANGELOG_PATH", missing):
+                app._show_changelog()
+
+        open_release_page.assert_called_once_with(RELEASES_URL)
+        release_notes_dialog.assert_not_called()
+
+    @patch("moviu_server.app.ReleaseNotesDialog")
+    @patch("moviu_server.app.open_release_page")
+    def test_changelog_opens_releases_when_bundled_file_is_invalid(
+        self, open_release_page, release_notes_dialog
+    ):
+        app = self.make_app()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            invalid = Path(temp_dir) / "CHANGELOG.md"
+            invalid.write_bytes(b"\xff")
+            with patch("moviu_server.app.CHANGELOG_PATH", invalid):
+                app._show_changelog()
+
+        open_release_page.assert_called_once_with(RELEASES_URL)
+        release_notes_dialog.assert_not_called()
 
     @patch("moviu_server.app.open_release_page")
     @patch("moviu_server.app.self_update_support")

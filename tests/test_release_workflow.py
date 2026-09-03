@@ -4,6 +4,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "release-binaries.yml"
+SPEC = ROOT / "MoviuPrintServer.spec"
 
 
 class ReleaseWorkflowTests(unittest.TestCase):
@@ -30,13 +31,19 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("MoviuPrintServer-Linux-x86_64", self.workflow)
         self.assertIn("PyInstaller --clean --noconfirm MoviuPrintServer.spec", self.workflow)
 
-    def test_release_is_created_with_generated_notes(self):
+    def test_release_uses_complete_changelog_notes(self):
         self.assertIn('gh release create "$RELEASE_TAG"', self.workflow)
-        self.assertIn("--generate-notes", self.workflow)
+        self.assertIn("--notes-file CHANGELOG.md", self.workflow)
+        self.assertIn('gh release edit "$RELEASE_TAG" --notes-file CHANGELOG.md', self.workflow)
         self.assertIn('gh release upload "$RELEASE_TAG" artifacts/* --clobber', self.workflow)
 
     def test_release_includes_binary_checksums(self):
         self.assertIn("sha256sum MoviuPrintServer-* > SHA256SUMS.txt", self.workflow)
+
+    def test_release_binary_includes_complete_changelog(self):
+        spec = SPEC.read_text(encoding="utf-8")
+
+        self.assertIn('(\"CHANGELOG.md\", \".\")', spec)
 
 
 if __name__ == "__main__":

@@ -98,7 +98,7 @@ mkdir -p dist/deb/DEBIAN dist/deb/usr/local/bin
 cp dist/MoviuPrintServer dist/deb/usr/local/bin/moviu-print-server
 cat > dist/deb/DEBIAN/control <<'EOF'
 Package: moviu-print-server
-Version: 1.4.0
+Version: 1.4.1
 Section: utils
 Priority: optional
 Architecture: amd64
