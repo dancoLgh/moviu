@@ -10,6 +10,14 @@ Descarga la version mas reciente desde GitHub Releases:
 - [Linux x86-64](https://github.com/dancoLgh/moviu/releases/latest/download/MoviuPrintServer-Linux-x86_64)
 - [Historial de versiones](https://github.com/dancoLgh/moviu/releases)
 
+## Actualizaciones automáticas
+
+En una instalación portátil, abre **Configuración > Actualizaciones** y pulsa **Buscar e instalar actualización**. Moviu descarga el binario correspondiente al sistema, verifica su tamaño y SHA-256, cierra la aplicación, reemplaza el ejecutable y vuelve a abrirla.
+
+La actualización automática requiere que Moviu se ejecute desde el binario empaquetado y que su carpeta permita escribir archivos. Si se ejecuta desde el código fuente, la arquitectura no es compatible o el ejecutable está en una carpeta protegida, la aplicación ofrece abrir la descarga manual.
+
+No es obligatorio utilizar un instalador para el modo portátil. Para instalar en una carpeta protegida como `Program Files` sí es necesario un instalador o actualizador firmado que pueda solicitar permisos de administrador; también permite crear accesos directos y ofrecer un desinstalador.
+
 ### Windows
 
 1. Descarga `MoviuPrintServer-Windows-x86_64.exe`.
@@ -90,7 +98,7 @@ mkdir -p dist/deb/DEBIAN dist/deb/usr/local/bin
 cp dist/MoviuPrintServer dist/deb/usr/local/bin/moviu-print-server
 cat > dist/deb/DEBIAN/control <<'EOF'
 Package: moviu-print-server
-Version: 1.3.0
+Version: 1.4.0
 Section: utils
 Priority: optional
 Architecture: amd64

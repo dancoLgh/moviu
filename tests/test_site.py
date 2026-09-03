@@ -6,6 +6,8 @@ from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlparse
 
+from moviu_server.config import VERSION
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SITE = ROOT / "site"
@@ -64,6 +66,9 @@ class GitHubPagesTest(unittest.TestCase):
             if "/releases/latest/download/" in link
         }
         self.assertEqual(download_names, expected)
+
+    def test_displayed_release_matches_application_version(self) -> None:
+        self.assertIn(f"Versión actual <strong>v{VERSION}</strong>", self.html)
 
     def test_core_message_is_present(self) -> None:
         plain_text = re.sub(r"<[^>]+>", " ", self.html).lower()

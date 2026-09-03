@@ -2,6 +2,17 @@
 
 Todos los cambios notables en este proyecto serán documentados en este archivo.
 
+## [1.4.0] - 2026-09-02
+
+### Añadido
+- Actualización automática y verificada del ejecutable desde la propia aplicación en Windows y Linux.
+- Archivo `SHA256SUMS.txt` en cada release para verificar la integridad de los binarios descargados.
+- Restauración automática de la versión anterior si la aplicación actualizada no confirma su arranque.
+
+### Mejorado
+- Las configuraciones de conexión, aplicación y puente USB tienen secciones y acciones de guardado claramente agrupadas.
+- La búsqueda y descarga de actualizaciones se ejecuta en segundo plano para no bloquear la interfaz.
+
 ## [1.3.0] - 2026-08-27
 
 ### Añadido

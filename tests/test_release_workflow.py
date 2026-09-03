@@ -35,6 +35,9 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("--generate-notes", self.workflow)
         self.assertIn('gh release upload "$RELEASE_TAG" artifacts/* --clobber', self.workflow)
 
+    def test_release_includes_binary_checksums(self):
+        self.assertIn("sha256sum MoviuPrintServer-* > SHA256SUMS.txt", self.workflow)
+
 
 if __name__ == "__main__":
     unittest.main()

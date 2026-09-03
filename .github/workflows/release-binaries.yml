@@ -114,6 +114,10 @@ jobs:
           path: artifacts
           merge-multiple: true
 
+      - name: Generate SHA-256 checksums
+        working-directory: artifacts
+        run: sha256sum MoviuPrintServer-* > SHA256SUMS.txt
+
       - name: Create release and attach binaries
         env:
           GH_TOKEN: ${{ github.token }}

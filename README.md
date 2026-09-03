@@ -28,6 +28,7 @@ Frente a alternativas como QZ Tray o JSPrintManager, Moviu propone una ruta enfo
 - Descubrimiento mDNS/DNS-SD mediante Bonjour o Avahi.
 - Modo de simulacion con vistas previas para desarrollar sin gastar papel.
 - Actualizaciones desde GitHub Releases y soporte para repositorios privados.
+- Actualización automática del ejecutable con verificación SHA-256 en instalaciones portátiles.
 
 ## Descarga rapida
 
@@ -128,8 +129,8 @@ python -m unittest discover -s tests
 Las releases se generan automaticamente al subir una etiqueta `v*`. Antes de crearla, actualiza `VERSION` en `moviu_server/config.py` y confirma que coincida con la etiqueta:
 
 ```bash
-git tag v1.3.0
-git push origin v1.3.0
+git tag v1.4.0
+git push origin v1.4.0
 ```
 
 GitHub Actions ejecuta las pruebas, compila Windows y Linux, genera las notas de la release y publica ambos binarios. Si alguna prueba o compilacion falla, la release no se crea.

@@ -51,7 +51,16 @@ from .ui_state import (
     printer_route_label,
     tooltip_coordinates,
 )
-from .updater import check_for_updates, open_release_page
+from .updater import (
+    WEBSITE_DOWNLOAD_URL,
+    acknowledge_update_startup,
+    download_update,
+    get_latest_release_info,
+    is_newer_release,
+    launch_self_update,
+    open_release_page,
+    self_update_support,
+)
 
 
 def _suppress_windows_connection_reset_noise() -> None:
@@ -271,6 +280,8 @@ class DesktopApp:
         self.activity_feed = ActivityFeed()
         self.ui_callback_queue: SimpleQueue[Callable[[], None]] = SimpleQueue()
         self._closing = False
+        self._update_busy = False
+        self._staged_update_path: Path | None = None
         self._server_start_token: object | None = None
         _ensure_streams()
         self._setup_logging()
@@ -288,6 +299,7 @@ class DesktopApp:
         self._apply_autostart(self.config.auto_start, notify=False)
         self._maybe_autostart_server()
         self._maybe_autostart_bridge()
+        acknowledge_update_startup()
 
     def _set_window_icon(self) -> None:
         """Apply the branded icon to the Tk window and Windows taskbar."""
@@ -777,12 +789,20 @@ class DesktopApp:
             ttk.Button(cert_card, text=label, style="Outline.TButton", command=command).grid(
                 row=row_index, column=0, columnspan=2, sticky="ew", pady=(8 if row_index == 3 else 3, 0)
             )
+
+        footer = self._card(page, padding=(16, 12))
+        footer.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+        ttk.Label(
+            footer,
+            text="Guarda la red antes de regenerar certificados o habilitar el firewall.",
+            style="Muted.TLabel",
+        ).pack(side=tk.LEFT)
         ttk.Button(
-            cert_card,
-            text="Guardar red",
+            footer,
+            text="Guardar cambios",
             style="Primary.TButton",
             command=self.save_settings,
-        ).grid(row=8, column=0, columnspan=2, sticky="ew", pady=(14, 0))
+        ).pack(side=tk.RIGHT)
 
     def _build_activity_page(self, page: ttk.Frame) -> None:
         page.rowconfigure(1, weight=1)
@@ -819,38 +839,55 @@ class DesktopApp:
             page.columnconfigure(column, weight=1)
         behavior = self._card(page)
         behavior.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
-        ttk.Label(behavior, text="Comportamiento", style="CardTitle.TLabel").pack(anchor="w")
+        ttk.Label(behavior, text="Inicio de la aplicación", style="CardTitle.TLabel").pack(anchor="w")
+        ttk.Label(
+            behavior,
+            text="Controla cuándo se inicia Moviu en este equipo.",
+            style="Muted.TLabel",
+            wraplength=320,
+        ).pack(anchor="w", pady=(8, 10))
         ttk.Checkbutton(
             behavior,
             text="Ejecutar Moviu al iniciar Windows",
             variable=self.auto_start_var,
-        ).pack(anchor="w", pady=(18, 8))
-        ttk.Checkbutton(
-            behavior,
-            text="Arrancar el puente USB automáticamente",
-            variable=self.bridge_autostart_var,
         ).pack(anchor="w", pady=8)
-        ttk.Button(
-            behavior,
-            text="Guardar configuración",
-            style="Primary.TButton",
-            command=self.save_settings,
-        ).pack(anchor="w", pady=(18, 0))
 
         updates = self._card(page)
         updates.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
-        ttk.Label(updates, text="Actualizaciones y soporte", style="CardTitle.TLabel").pack(anchor="w")
+        ttk.Label(updates, text="Actualizaciones", style="CardTitle.TLabel").pack(anchor="w")
+        self.update_status_var = tk.StringVar(value=f"Versión instalada: v{VERSION}")
+        ttk.Label(
+            updates,
+            textvariable=self.update_status_var,
+            style="InfoBadge.TLabel",
+        ).pack(anchor="w", pady=(10, 6))
         ttk.Label(updates, text="GitHub token privado", style="FieldLabel.TLabel").pack(
-            anchor="w", pady=(18, 6)
+            anchor="w", pady=(10, 6)
         )
         ttk.Entry(updates, textvariable=self.github_token_var, show="*").pack(fill=tk.X)
-        ttk.Button(updates, text="Buscar actualizaciones", command=self._manual_update_check).pack(
+        self.update_button = ttk.Button(
+            updates,
+            text="Buscar e instalar actualización",
+            command=self._manual_update_check,
+        )
+        self.update_button.pack(
             fill=tk.X, pady=(14, 5)
         )
         ttk.Button(updates, text="Ver novedades", command=self._show_changelog).pack(fill=tk.X, pady=5)
-        ttk.Button(updates, text="Abrir simulaciones", command=self.open_simulations).pack(
-            fill=tk.X, pady=5
-        )
+
+        footer = self._card(page, padding=(16, 12))
+        footer.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+        ttk.Label(
+            footer,
+            text="El puente USB y las herramientas técnicas están en el panel avanzado.",
+            style="Muted.TLabel",
+        ).pack(side=tk.LEFT)
+        ttk.Button(
+            footer,
+            text="Guardar cambios",
+            style="Primary.TButton",
+            command=self.save_settings,
+        ).pack(side=tk.RIGHT)
 
     def _build_help_page(self, page: ttk.Frame) -> None:
         for column in (0, 1):
@@ -914,7 +951,7 @@ class DesktopApp:
         ttk.Label(panel, text="Configuración avanzada", style="AdvancedTitle.TLabel").pack(anchor="w")
         ttk.Label(
             panel,
-            text="Opciones técnicas del servicio local.",
+            text="Puente USB y herramientas técnicas.",
             style="AdvancedMuted.TLabel",
         ).pack(anchor="w", pady=(4, 14))
         self.accordions: dict[str, tuple[ttk.Button, ttk.Frame, str, bool]] = {}
@@ -959,31 +996,7 @@ class DesktopApp:
         self.advanced_canvas.bind("<Button-4>", self._scroll_advanced_panel)
         self.advanced_canvas.bind("<Button-5>", self._scroll_advanced_panel)
 
-        network = self._accordion(content, "network", "Red y API", expanded=True)
-        ttk.Label(network, text="Host API", style="AdvancedLabel.TLabel").pack(anchor="w")
-        ttk.Entry(network, textvariable=self.host_var).pack(fill=tk.X, pady=(4, 9))
-        ttk.Label(network, text="Puerto API", style="AdvancedLabel.TLabel").pack(anchor="w")
-        ttk.Entry(network, textvariable=self.port_var).pack(fill=tk.X, pady=(4, 9))
-        ttk.Label(network, text="API key", style="AdvancedLabel.TLabel").pack(anchor="w")
-        ttk.Entry(network, textvariable=self.api_key_var, state="readonly").pack(
-            fill=tk.X, pady=(4, 8)
-        )
-        network_actions = ttk.Frame(network, style="AdvancedBody.TFrame")
-        network_actions.pack(fill=tk.X)
-        ttk.Button(network_actions, text="Copiar", command=self._copy_api_key).pack(side=tk.LEFT)
-        ttk.Button(network_actions, text="Guardar", command=self.save_settings).pack(side=tk.RIGHT)
-        ttk.Button(
-            network,
-            text="Habilitar acceso en la red local",
-            command=self.enable_local_network_access,
-        ).pack(fill=tk.X, pady=(8, 0))
-        ttk.Button(
-            network,
-            text="Retirar acceso del firewall",
-            command=self.disable_local_network_access,
-        ).pack(fill=tk.X, pady=(4, 0))
-
-        bridge = self._accordion(content, "bridge", "Puente USB")
+        bridge = self._accordion(content, "bridge", "Puente USB", expanded=True)
         bridge_help = ttk.Frame(bridge, style="AdvancedBody.TFrame")
         bridge_help.pack(fill=tk.X, pady=(0, 8))
         ttk.Label(bridge_help, text="Convierte TCP en impresión USB", style="AdvancedLabel.TLabel").pack(
@@ -1016,6 +1029,34 @@ class DesktopApp:
         ttk.Button(bridge_actions, text="Actualizar", command=self.refresh_printers).pack(side=tk.LEFT)
         ttk.Button(bridge_actions, text="Iniciar", command=self.start_bridge).pack(side=tk.LEFT, padx=5)
         ttk.Button(bridge_actions, text="Detener", command=self.stop_bridge).pack(side=tk.RIGHT)
+        ttk.Button(
+            bridge,
+            text="Guardar configuración del puente",
+            command=self.save_settings,
+        ).pack(fill=tk.X, pady=(8, 0))
+
+        network = self._accordion(content, "network", "Acceso de red")
+        ttk.Label(
+            network,
+            text="La dirección, el puerto y la API key se administran desde la página Conexión.",
+            style="AdvancedMuted.TLabel",
+            wraplength=240,
+        ).pack(anchor="w", fill=tk.X, pady=(0, 8))
+        ttk.Button(
+            network,
+            text="Ir a Conexión",
+            command=lambda: self._show_page("connection"),
+        ).pack(fill=tk.X)
+        ttk.Button(
+            network,
+            text="Habilitar acceso en la red local",
+            command=self.enable_local_network_access,
+        ).pack(fill=tk.X, pady=(8, 0))
+        ttk.Button(
+            network,
+            text="Retirar acceso del firewall",
+            command=self.disable_local_network_access,
+        ).pack(fill=tk.X, pady=(4, 0))
 
         security = self._accordion(content, "security", "Seguridad y certificados")
         for label, command in [
@@ -1191,27 +1232,134 @@ class DesktopApp:
     def _background_update_check(self) -> None:
         """Check for updates in a background thread."""
         def _target():
-            available, version, url = check_for_updates(self.config.github_token)
-            if available and url:
-                self.latest_update_url = url
+            info = get_latest_release_info(self.config.github_token)
+            if is_newer_release(info):
+                self.latest_release_info = info
+                version = info.get("tag_name", "")
                 self._queue_ui_callback(
-                    lambda: self.update_link_var.set(f"¡Nueva versión disponible: {version}!")
+                    lambda: self._show_available_update(str(version))
                 )
         
         threading.Thread(target=_target, daemon=True).start()
 
     def _manual_update_check(self) -> None:
-        """Manually trigger an update check with a popup."""
-        available, version, url = check_for_updates(self.config.github_token)
-        if available and url:
-            if messagebox.askyesno("Actualización disponible", f"Hay una nueva versión disponible: {version}\n¿Deseas descargarla ahora?"):
-                open_release_page(url)
-        else:
+        """Check for updates without blocking the Tk event loop."""
+
+        if self._update_busy:
+            return
+        self._set_update_status("Buscando actualizaciones...", busy=True)
+        token = self.github_token_var.get().strip()
+
+        def _target():
+            info = get_latest_release_info(token)
+            self._queue_ui_callback(lambda: self._handle_update_check(info, token))
+
+        threading.Thread(target=_target, daemon=True).start()
+
+    def _set_update_status(self, text: str, *, busy: bool | None = None) -> None:
+        if busy is not None:
+            self._update_busy = busy
+        if hasattr(self, "update_status_var"):
+            self.update_status_var.set(text)
+        if hasattr(self, "update_button"):
+            self.update_button.configure(state="disabled" if self._update_busy else "normal")
+
+    def _show_available_update(self, version: str) -> None:
+        self.update_link_var.set(f"Nueva versión disponible: {version}")
+        self._set_update_status(f"Disponible: {version}")
+
+    def _handle_update_check(self, info: dict | None, token: str) -> None:
+        if info is None:
+            self._set_update_status("No se pudo consultar GitHub", busy=False)
+            messagebox.showerror(
+                "Actualización",
+                "No se pudo consultar la última versión. Revisa la conexión o el token de GitHub.",
+            )
+            return
+        if not is_newer_release(info):
+            self._set_update_status(f"Versión instalada: v{VERSION}", busy=False)
             messagebox.showinfo("Actualización", "Ya tienes la última versión instalada.")
+            return
+
+        self.latest_release_info = info
+        self._update_busy = False
+        version = str(info.get("tag_name", "nueva versión"))
+        self._show_available_update(version)
+        supported, reason = self_update_support()
+        if not supported:
+            if messagebox.askyesno(
+                "Actualización disponible",
+                f"Hay una nueva versión disponible: {version}.\n\n{reason}.\n"
+                "¿Deseas abrir la descarga manual?",
+            ):
+                open_release_page(WEBSITE_DOWNLOAD_URL)
+            return
+
+        if messagebox.askyesno(
+            "Instalar actualización",
+            f"Se descargará y verificará {version}. Después Moviu se cerrará, "
+            "reemplazará el ejecutable y volverá a abrirse.\n\n¿Continuar?",
+        ):
+            self._download_and_install_update(info, token)
+
+    def _download_and_install_update(self, info: dict, token: str) -> None:
+        version = str(info.get("tag_name", "nueva versión"))
+        self._set_update_status(f"Descargando {version}...", busy=True)
+        target_dir = Path(sys.executable).resolve().parent
+
+        def _target():
+            try:
+                staged_path = download_update(info, target_dir, token)
+            except Exception as exc:  # noqa: BLE001
+                self._queue_ui_callback(lambda error=exc: self._show_update_error(error))
+                return
+            self._staged_update_path = staged_path
+            if self._closing:
+                self._cleanup_staged_update()
+                return
+            try:
+                launch_self_update(staged_path)
+            except Exception as exc:  # noqa: BLE001
+                self._cleanup_staged_update()
+                self._queue_ui_callback(lambda error=exc: self._show_update_error(error))
+                return
+            self._staged_update_path = None
+            self._queue_ui_callback(lambda: self._finish_update_install(version))
+
+        threading.Thread(target=_target, daemon=True).start()
+
+    def _show_update_error(self, error: Exception) -> None:
+        self._set_update_status("La actualización no pudo instalarse", busy=False)
+        messagebox.showerror(
+            "Error de actualización",
+            f"{error}\n\nPuedes descargar la versión manualmente desde la web de Moviu.",
+        )
+
+    def _finish_update_install(self, version: str) -> None:
+        self._set_update_status(f"Instalando {version}...")
+        messagebox.showinfo(
+            "Actualización lista",
+            "Moviu se cerrará ahora y volverá a abrirse con la nueva versión.",
+        )
+        self._do_exit()
 
     def _on_update_click(self) -> None:
-        if hasattr(self, 'latest_update_url'):
-            open_release_page(self.latest_update_url)
+        if self._update_busy:
+            return
+        info = getattr(self, "latest_release_info", None)
+        if info is not None:
+            self._handle_update_check(info, self.github_token_var.get().strip())
+        else:
+            self._manual_update_check()
+
+    def _cleanup_staged_update(self) -> None:
+        staged_path = getattr(self, "_staged_update_path", None)
+        if staged_path is not None:
+            try:
+                staged_path.unlink(missing_ok=True)
+            except OSError:
+                logging.exception("No se pudo eliminar la actualización temporal")
+            self._staged_update_path = None
 
     def _show_changelog(self) -> None:
         """Fetch latest notes from GitHub or fall back to local CHANGELOG.md."""
@@ -1520,6 +1668,7 @@ class DesktopApp:
         if self._closing:
             return
         self._closing = True
+        self._cleanup_staged_update()
         self.stop_server()
         self.stop_bridge()
         self.tray.stop()
