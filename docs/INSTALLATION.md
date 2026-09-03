@@ -14,6 +14,8 @@ Descarga la version mas reciente desde GitHub Releases:
 
 En una instalación portátil, abre **Configuración > Actualizaciones** y pulsa **Buscar e instalar actualización**. Moviu descarga el binario correspondiente al sistema, verifica su tamaño y SHA-256, cierra la aplicación, reemplaza el ejecutable y vuelve a abrirla.
 
+> **Actualización a v1.4.2:** si tienes `v1.4.0` o `v1.4.1`, descarga y reemplaza el ejecutable manualmente una sola vez. Esas versiones no pueden reiniciar correctamente el proceso de actualización automática. Desde `v1.4.2`, las siguientes actualizaciones sí pueden instalarse automáticamente.
+
 La actualización automática requiere que Moviu se ejecute desde el binario empaquetado y que su carpeta permita escribir archivos. Si se ejecuta desde el código fuente, la arquitectura no es compatible o el ejecutable está en una carpeta protegida, la aplicación ofrece abrir la descarga manual.
 
 No es obligatorio utilizar un instalador para el modo portátil. Para instalar en una carpeta protegida como `Program Files` sí es necesario un instalador o actualizador firmado que pueda solicitar permisos de administrador; también permite crear accesos directos y ofrecer un desinstalador.
@@ -98,7 +100,7 @@ mkdir -p dist/deb/DEBIAN dist/deb/usr/local/bin
 cp dist/MoviuPrintServer dist/deb/usr/local/bin/moviu-print-server
 cat > dist/deb/DEBIAN/control <<'EOF'
 Package: moviu-print-server
-Version: 1.4.1
+Version: 1.4.2
 Section: utils
 Priority: optional
 Architecture: amd64

@@ -266,6 +266,7 @@ $ready = {_powershell_quote(ready_file)}
 $armed = {_powershell_quote(armed_file)}
 $readyToken = '{ready_token}'
 $backupCreated = $false
+$env:PYINSTALLER_RESET_ENVIRONMENT = '1'
 Set-Content -LiteralPath $armed -Value $readyToken -NoNewline -Encoding ascii
 Wait-Process -Id {parent_pid} -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $armed -Force -ErrorAction SilentlyContinue
@@ -322,6 +323,8 @@ def _linux_update_script(
     quoted_ready = shlex.quote(str(ready_file))
     quoted_armed = shlex.quote(str(armed_file))
     return f"""#!/bin/sh
+PYINSTALLER_RESET_ENVIRONMENT=1
+export PYINSTALLER_RESET_ENVIRONMENT
 printf %s "{ready_token}" > {quoted_armed}
 while kill -0 {parent_pid} 2>/dev/null; do sleep 1; done
 rm -f -- {quoted_armed}

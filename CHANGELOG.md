@@ -2,6 +2,15 @@
 
 Todos los cambios notables en este proyecto serán documentados en este archivo.
 
+## [1.4.2] - 2026-09-02
+
+### Corregido
+- El reinicio posterior a una actualización usa un entorno nuevo de PyInstaller y ya no intenta cargar archivos desde un directorio temporal `_MEI` eliminado.
+- El arranque de recuperación también limpia el entorno de PyInstaller para que la versión anterior pueda abrirse correctamente después de un rollback.
+
+### Importante
+- La actualización desde `v1.4.0` o `v1.4.1` debe instalarse manualmente una sola vez debido al error de reinicio de esas versiones. Las actualizaciones automáticas posteriores funcionarán desde `v1.4.2`.
+
 ## [1.4.1] - 2026-09-02
 
 ### Corregido

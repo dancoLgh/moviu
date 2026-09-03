@@ -14,6 +14,7 @@ from moviu_server.updater import (
     WEBSITE_DOWNLOAD_URL,
     UpdateError,
     _SafeRedirectHandler,
+    _linux_update_script,
     acknowledge_update_startup,
     check_for_updates,
     download_update,
@@ -155,6 +156,31 @@ class SelfUpdateInstallerTests(unittest.TestCase):
         self.assertIn("José", script)
         self.assertIn("La nueva versión no confirmó el arranque", script)
         self.assertIn("if ($backupCreated)", script)
+        reset_environment = "$env:PYINSTALLER_RESET_ENVIRONMENT = '1'"
+        self.assertIn(reset_environment, script)
+        self.assertLess(
+            script.index(reset_environment),
+            script.index("Start-Process -FilePath $target"),
+        )
+
+    def test_linux_restarts_use_a_fresh_pyinstaller_environment(self):
+        script = _linux_update_script(
+            Path("/opt/moviu/MoviuPrintServer"),
+            Path("/opt/moviu/.moviu-update.bin"),
+            Path("/tmp/moviu-ready"),
+            Path("/tmp/moviu-armed"),
+            "a" * 32,
+            123,
+        )
+
+        export_environment = (
+            "PYINSTALLER_RESET_ENVIRONMENT=1\nexport PYINSTALLER_RESET_ENVIRONMENT"
+        )
+        self.assertIn(export_environment, script)
+        self.assertLess(
+            script.index(export_environment),
+            script.index("/opt/moviu/MoviuPrintServer"),
+        )
 
     @unittest.skipUnless(sys.platform == "linux", "Requiere un entorno Linux")
     def test_linux_installer_replaces_and_restarts_executable(self):
