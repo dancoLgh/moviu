@@ -20,7 +20,7 @@ Respuesta de ejemplo:
       "port": 9000,
       "addresses": ["192.168.1.156"],
       "properties": {
-        "version": "1.4.2",
+        "version": "1.4.3",
         "protocol": "https",
         "hostname": "DESKTOP-ABC123"
       }

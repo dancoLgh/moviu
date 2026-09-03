@@ -60,6 +60,7 @@ from .updater import (
     launch_self_update,
     open_release_page,
     self_update_support,
+    verify_staged_update,
 )
 
 CHANGELOG_PATH = Path(__file__).resolve().parent.parent / "CHANGELOG.md"
@@ -285,6 +286,9 @@ class DesktopApp:
         self._closing = False
         self._update_busy = False
         self._staged_update_path: Path | None = None
+        self._update_dialog: UpdateProgressDialog | None = None
+        self._update_install_lock = threading.Lock()
+        self._update_thread: threading.Thread | None = None
         self._server_start_token: object | None = None
         _ensure_streams()
         self._setup_logging()
@@ -1308,43 +1312,79 @@ class DesktopApp:
     def _download_and_install_update(self, info: dict, token: str) -> None:
         version = str(info.get("tag_name", "nueva versión"))
         self._set_update_status(f"Descargando {version}...", busy=True)
+        self._show_update_progress(version)
         target_dir = Path(sys.executable).resolve().parent
+
+        def _report_progress(message: str, completed: int, total: int | None) -> None:
+            self._queue_ui_callback(
+                lambda: self._update_progress_dialog(message, completed, total)
+            )
 
         def _target():
             try:
-                staged_path = download_update(info, target_dir, token)
+                staged_path = download_update(
+                    info,
+                    target_dir,
+                    token,
+                    progress_callback=_report_progress,
+                )
             except Exception as exc:  # noqa: BLE001
                 self._queue_ui_callback(lambda error=exc: self._show_update_error(error))
                 return
-            self._staged_update_path = staged_path
-            if self._closing:
+            with self._update_install_lock:
+                self._staged_update_path = staged_path
+                closing = self._closing
+            if closing:
                 self._cleanup_staged_update()
                 return
             try:
-                launch_self_update(staged_path)
+                _report_progress("Comprobando arranque seguro...", 0, None)
+                verify_staged_update(staged_path)
+                with self._update_install_lock:
+                    if self._closing:
+                        self._cleanup_staged_update()
+                        return
+                    _report_progress("Preparando reinicio seguro...", 0, None)
+                    launch_self_update(staged_path)
+                    self._staged_update_path = None
             except Exception as exc:  # noqa: BLE001
                 self._cleanup_staged_update()
                 self._queue_ui_callback(lambda error=exc: self._show_update_error(error))
                 return
-            self._staged_update_path = None
             self._queue_ui_callback(lambda: self._finish_update_install(version))
 
-        threading.Thread(target=_target, daemon=True).start()
+        self._update_thread = threading.Thread(target=_target, daemon=False)
+        self._update_thread.start()
+
+    def _show_update_progress(self, version: str) -> None:
+        if self._update_dialog is not None:
+            try:
+                self._update_dialog.destroy()
+            except tk.TclError:
+                pass
+        self._update_dialog = UpdateProgressDialog(self.root, version)
+
+    def _update_progress_dialog(
+        self, message: str, completed: int, total: int | None
+    ) -> None:
+        if self._update_dialog is not None:
+            self._update_dialog.set_progress(message, completed, total)
 
     def _show_update_error(self, error: Exception) -> None:
         self._set_update_status("La actualización no pudo instalarse", busy=False)
+        if self._update_dialog is not None:
+            self._update_dialog.fail(str(error))
         messagebox.showerror(
             "Error de actualización",
             f"{error}\n\nPuedes descargar la versión manualmente desde la web de Moviu.",
+            parent=self._update_dialog or self.root,
         )
 
     def _finish_update_install(self, version: str) -> None:
         self._set_update_status(f"Instalando {version}...")
-        messagebox.showinfo(
-            "Actualización lista",
-            "Moviu se cerrará ahora y volverá a abrirse con la nueva versión.",
-        )
-        self._do_exit()
+        if self._update_dialog is not None:
+            self._update_dialog.complete()
+        self.root.after(1200, self._do_exit)
 
     def _on_update_click(self) -> None:
         if self._update_busy:
@@ -1649,10 +1689,12 @@ class DesktopApp:
         messagebox.showinfo("Copiado", "URL del portal copiada al portapapeles")
 
     def _do_exit(self) -> None:
-        if self._closing:
-            return
-        self._closing = True
-        self._cleanup_staged_update()
+        with self._update_install_lock:
+            if self._closing:
+                return
+            self._closing = True
+            if not self._update_busy:
+                self._cleanup_staged_update()
         self.stop_server()
         self.stop_bridge()
         self.tray.stop()
@@ -2008,6 +2050,14 @@ class DesktopApp:
         style.configure("TCheckbutton", background=surface, foreground="#c4d0df", font=("Segoe UI", 9))
         style.map("TCheckbutton", background=[("active", surface)], foreground=[("active", text)])
         style.configure("Horizontal.TScale", background=surface, troughcolor="#0a1727")
+        style.configure(
+            "Update.Horizontal.TProgressbar",
+            background=blue,
+            troughcolor="#0a1727",
+            bordercolor="#0a1727",
+            lightcolor=blue,
+            darkcolor=blue,
+        )
         style.configure("TSeparator", background="#1d3149")
 
     def _configure_window_hooks(self) -> None:
@@ -2064,6 +2114,99 @@ class DesktopApp:
             if notify:
                 estado = "activado" if enabled else "desactivado"
                 logging.info("Autoinicio %s", estado)
+
+
+class UpdateProgressDialog(tk.Toplevel):
+    """Show download, verification, and installation progress."""
+
+    def __init__(self, parent: tk.Misc, version: str) -> None:
+        super().__init__(parent)
+        self.title("Actualizando Moviu")
+        self.geometry("500x245")
+        self.resizable(False, False)
+        self.configure(bg="#07111f")
+        self.transient(parent)
+        self.grab_set()
+        self.protocol("WM_DELETE_WINDOW", lambda: None)
+        self._indeterminate = False
+
+        frame = ttk.Frame(self, style="Surface.TFrame", padding=24)
+        frame.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
+        ttk.Label(
+            frame,
+            text="ACTUALIZACIÓN SEGURA",
+            style="Status.TLabel",
+        ).pack(anchor="w")
+        ttk.Label(
+            frame,
+            text=f"Instalando {version}",
+            style="HeroTitle.TLabel",
+        ).pack(anchor="w", pady=(5, 16))
+
+        self.status_var = tk.StringVar(value="Preparando descarga...")
+        ttk.Label(
+            frame,
+            textvariable=self.status_var,
+            style="BodyStrong.TLabel",
+        ).pack(anchor="w")
+        self.progress = ttk.Progressbar(
+            frame,
+            mode="indeterminate",
+            style="Update.Horizontal.TProgressbar",
+            length=440,
+        )
+        self.progress.pack(fill=tk.X, pady=(12, 8))
+        self.detail_var = tk.StringVar(
+            value="Moviu comprobará el tamaño y la firma SHA-256 antes de instalar."
+        )
+        ttk.Label(
+            frame,
+            textvariable=self.detail_var,
+            style="Muted.TLabel",
+            wraplength=440,
+        ).pack(anchor="w")
+        self.close_button = ttk.Button(frame, text="Cerrar", command=self.destroy)
+
+        self.progress.start(12)
+        self._indeterminate = True
+
+    def set_progress(self, message: str, completed: int, total: int | None) -> None:
+        self.status_var.set(message)
+        if total:
+            if self._indeterminate:
+                self.progress.stop()
+                self._indeterminate = False
+            self.progress.configure(mode="determinate", maximum=total, value=completed)
+            percentage = min(100, int(completed * 100 / total))
+            self.detail_var.set(
+                f"{completed / (1024 * 1024):.1f} MB de "
+                f"{total / (1024 * 1024):.1f} MB ({percentage}%)"
+            )
+            return
+
+        self.progress.configure(mode="indeterminate")
+        if not self._indeterminate:
+            self.progress.start(12)
+            self._indeterminate = True
+        self.detail_var.set("No cierres Moviu mientras termina esta etapa.")
+
+    def complete(self) -> None:
+        if self._indeterminate:
+            self.progress.stop()
+            self._indeterminate = False
+        self.progress.configure(mode="determinate", maximum=1, value=1)
+        self.status_var.set("Actualización verificada y lista para instalar")
+        self.detail_var.set("Moviu se cerrará y volverá a abrirse con la nueva versión.")
+
+    def fail(self, message: str) -> None:
+        if self._indeterminate:
+            self.progress.stop()
+            self._indeterminate = False
+        self.progress.configure(mode="determinate", maximum=1, value=0)
+        self.status_var.set("No se pudo instalar la actualización")
+        self.detail_var.set(message)
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+        self.close_button.pack(anchor="e", pady=(14, 0))
 
 
 class ReleaseNotesDialog(tk.Toplevel):

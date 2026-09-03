@@ -31,6 +31,16 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("MoviuPrintServer-Linux-x86_64", self.workflow)
         self.assertIn("PyInstaller --clean --noconfirm MoviuPrintServer.spec", self.workflow)
 
+    def test_packaged_binaries_pass_runtime_self_test_before_upload(self):
+        self.assertIn("Smoke-test Windows executable", self.workflow)
+        self.assertIn('ArgumentList "--self-test"', self.workflow)
+        self.assertIn("WaitForExit(45000)", self.workflow)
+        self.assertIn("taskkill.exe /PID $($process.Id) /T /F", self.workflow)
+        self.assertIn(
+            "timeout --kill-after=5s 45s dist/MoviuPrintServer --self-test",
+            self.workflow,
+        )
+
     def test_release_uses_complete_changelog_notes(self):
         self.assertIn('gh release create "$RELEASE_TAG"', self.workflow)
         self.assertIn("--notes-file CHANGELOG.md", self.workflow)

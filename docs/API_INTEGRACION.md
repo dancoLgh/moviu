@@ -123,7 +123,7 @@ Descubrir servidores Moviu en la red local (mDNS). **No requiere autenticación.
       "name": "Moviu Print Server._moviu-print._tcp.local.",
       "port": 9000,
       "addresses": ["192.168.1.156"],
-      "properties": {"version": "1.4.2", "api_version": "1.0", "protocol": "https"}
+      "properties": {"version": "1.4.3", "api_version": "1.0", "protocol": "https"}
     }
   ],
   "count": 1

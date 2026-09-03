@@ -2,6 +2,15 @@
 
 Todos los cambios notables en este proyecto serán documentados en este archivo.
 
+## [1.4.3] - 2026-09-03
+
+### Añadido
+- Pantalla de progreso para mostrar la descarga, verificación SHA-256, prueba de arranque y preparación de la instalación.
+- Prueba segura del ejecutable descargado antes de cerrar o reemplazar la versión instalada.
+
+### Mejorado
+- Los binarios empaquetados deben superar una prueba de carga de SSL y de las dependencias de la aplicación antes de publicarse en GitHub Releases.
+
 ## [1.4.2] - 2026-09-02
 
 ### Corregido

@@ -14,6 +14,7 @@ from moviu_server.updater import (
     WEBSITE_DOWNLOAD_URL,
     UpdateError,
     _SafeRedirectHandler,
+    _download_asset,
     _linux_update_script,
     acknowledge_update_startup,
     check_for_updates,
@@ -22,6 +23,7 @@ from moviu_server.updater import (
     launch_self_update,
     select_release_asset,
     self_update_support,
+    verify_staged_update,
 )
 
 
@@ -87,6 +89,7 @@ class UpdateDownloadTests(unittest.TestCase):
     def test_downloads_and_verifies_release_binary(self, download_asset):
         checksum_file = f"{self.checksum}  {WINDOWS_ASSET}\n".encode()
         download_asset.side_effect = [checksum_file, self.payload]
+        progress = MagicMock()
 
         with tempfile.TemporaryDirectory() as temp_dir:
             staged = download_update(
@@ -94,10 +97,15 @@ class UpdateDownloadTests(unittest.TestCase):
                 Path(temp_dir),
                 platform_name="win32",
                 machine="x86_64",
+                progress_callback=progress,
             )
 
             self.assertEqual(staged.read_bytes(), self.payload)
             self.assertEqual(staged.suffix, ".exe")
+            messages = [call.args[0] for call in progress.call_args_list]
+            self.assertEqual(messages[0], "Descargando archivo de verificación...")
+            self.assertIn("Verificando integridad SHA-256...", messages)
+            self.assertEqual(messages[-1], "Descarga verificada correctamente")
 
     @patch("moviu_server.updater._download_asset")
     def test_rejects_binary_with_wrong_checksum(self, download_asset):
@@ -113,8 +121,65 @@ class UpdateDownloadTests(unittest.TestCase):
                     machine="x86_64",
                 )
 
+    @patch("moviu_server.updater.urllib.request.build_opener")
+    def test_asset_download_reports_streamed_byte_progress(self, build_opener):
+        response = MagicMock()
+        response.headers = {"Content-Length": "6"}
+        response.read.side_effect = [b"abc", b"def", b""]
+        build_opener.return_value.open.return_value.__enter__.return_value = response
+        progress = MagicMock()
+
+        payload = _download_asset(
+            {"url": "https://github.com/download", "size": 6},
+            progress_callback=progress,
+        )
+
+        self.assertEqual(payload, b"abcdef")
+        self.assertEqual(
+            [call.args for call in progress.call_args_list],
+            [(3, 6), (6, 6)],
+        )
+
 
 class SelfUpdateInstallerTests(unittest.TestCase):
+    @patch("moviu_server.updater.subprocess.run")
+    def test_staged_executable_passes_self_test_in_clean_environment(self, run):
+        staged = Path("/opt/moviu/.moviu-update.bin")
+
+        def confirm_self_test(*_args, **kwargs):
+            marker = Path(kwargs["env"]["MOVIU_SELF_TEST_FILE"])
+            marker.write_text(kwargs["env"]["MOVIU_SELF_TEST_TOKEN"], encoding="ascii")
+            return MagicMock(returncode=0)
+
+        run.side_effect = confirm_self_test
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch("moviu_server.updater.CONFIG_DIR", Path(temp_dir)):
+                verify_staged_update(staged)
+
+        self.assertEqual(run.call_args.args[0], [str(staged), "--self-test"])
+        self.assertEqual(
+            run.call_args.kwargs["env"]["PYINSTALLER_RESET_ENVIRONMENT"], "1"
+        )
+
+    @patch("moviu_server.updater.subprocess.run")
+    def test_staged_executable_is_rejected_when_self_test_fails(self, run):
+        run.return_value.returncode = 1
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch("moviu_server.updater.CONFIG_DIR", Path(temp_dir)):
+                with self.assertRaisesRegex(UpdateError, "prueba de arranque segura"):
+                    verify_staged_update(Path("/opt/moviu/.moviu-update.bin"))
+
+    @patch("moviu_server.updater.subprocess.run")
+    def test_staged_executable_must_attest_that_self_test_ran(self, run):
+        run.return_value.returncode = 0
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch("moviu_server.updater.CONFIG_DIR", Path(temp_dir)):
+                with self.assertRaisesRegex(UpdateError, "prueba de arranque segura"):
+                    verify_staged_update(Path("/opt/moviu/.moviu-update.bin"))
+
     @patch("moviu_server.updater.sys.frozen", False, create=True)
     def test_source_execution_uses_manual_update(self):
         supported, reason = self_update_support()

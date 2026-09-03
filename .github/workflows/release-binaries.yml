@@ -82,6 +82,25 @@ jobs:
       - name: Build executable
         run: python -m PyInstaller --clean --noconfirm MoviuPrintServer.spec
 
+      - name: Smoke-test Windows executable
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath "dist/MoviuPrintServer.exe" -ArgumentList "--self-test" -PassThru
+          if (-not $process.WaitForExit(45000)) {
+            taskkill.exe /PID $($process.Id) /T /F
+            throw "Packaged executable self-test timed out"
+          }
+          if ($process.ExitCode -ne 0) {
+            throw "Packaged executable self-test failed with exit code $($process.ExitCode)"
+          }
+
+      - name: Smoke-test Linux executable
+        if: runner.os == 'Linux'
+        env:
+          PYSTRAY_BACKEND: dummy
+        run: timeout --kill-after=5s 45s dist/MoviuPrintServer --self-test
+
       - name: Prepare Windows artifact
         if: runner.os == 'Windows'
         shell: pwsh

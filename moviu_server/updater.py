@@ -17,7 +17,7 @@ import time
 import urllib.request
 import webbrowser
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 from urllib.parse import urlparse
 
 from .config import CONFIG_DIR, VERSION
@@ -41,6 +41,8 @@ ALLOWED_DOWNLOAD_HOSTS = {
 }
 
 logger = logging.getLogger(__name__)
+
+UpdateProgressCallback = Callable[[str, int, Optional[int]], None]
 
 
 class UpdateError(RuntimeError):
@@ -163,7 +165,11 @@ class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
         return redirected
 
 
-def _download_asset(asset: dict, token: Optional[str] = None) -> bytes:
+def _download_asset(
+    asset: dict,
+    token: Optional[str] = None,
+    progress_callback: Optional[Callable[[int, Optional[int]], None]] = None,
+) -> bytes:
     url = asset.get("url") or asset.get("browser_download_url")
     if not url:
         raise UpdateError(f"El asset {asset.get('name', '')} no tiene URL de descarga")
@@ -173,10 +179,15 @@ def _download_asset(asset: dict, token: Optional[str] = None) -> bytes:
     request = urllib.request.Request(url, headers=_request_headers(token, binary=True))
     opener = urllib.request.build_opener(_SafeRedirectHandler())
     with opener.open(request, timeout=60) as response:
-        data = response.read(MAX_UPDATE_SIZE + 1)
-    if len(data) > MAX_UPDATE_SIZE:
-        raise UpdateError("La actualización excede el tamaño máximo permitido")
-    return data
+        total = int(asset.get("size") or response.headers.get("Content-Length") or 0) or None
+        data = bytearray()
+        while chunk := response.read(1024 * 1024):
+            data.extend(chunk)
+            if len(data) > MAX_UPDATE_SIZE:
+                raise UpdateError("La actualización excede el tamaño máximo permitido")
+            if progress_callback:
+                progress_callback(len(data), total)
+    return bytes(data)
 
 
 def _expected_checksum(info: dict, asset_name: str, token: Optional[str]) -> str:
@@ -204,20 +215,38 @@ def download_update(
     *,
     platform_name: Optional[str] = None,
     machine: Optional[str] = None,
+    progress_callback: Optional[UpdateProgressCallback] = None,
 ) -> Path:
     """Download and verify a release binary into the application directory."""
 
     asset = select_release_asset(info, platform_name=platform_name, machine=machine)
     asset_name = str(asset["name"])
+    if progress_callback:
+        progress_callback("Descargando archivo de verificación...", 0, None)
     expected_checksum = _expected_checksum(info, asset_name, token)
-    payload = _download_asset(asset, token)
 
     expected_size = int(asset.get("size") or 0)
+    if progress_callback:
+        progress_callback("Descargando actualización...", 0, expected_size or None)
+    payload = _download_asset(
+        asset,
+        token,
+        lambda downloaded, total: progress_callback(
+            "Descargando actualización...", downloaded, expected_size or total
+        )
+        if progress_callback
+        else None,
+    )
+
+    if progress_callback:
+        progress_callback("Verificando integridad SHA-256...", 0, None)
     if expected_size and len(payload) != expected_size:
         raise UpdateError("La descarga no coincide con el tamaño publicado")
     if hashlib.sha256(payload).hexdigest() != expected_checksum:
         raise UpdateError("La verificación SHA-256 de la actualización ha fallado")
 
+    if progress_callback:
+        progress_callback("Preparando archivo de instalación...", 0, None)
     suffix = ".exe" if (platform_name or sys.platform) == "win32" else ".bin"
     target_dir.mkdir(parents=True, exist_ok=True)
     staged_path: Path | None = None
@@ -240,6 +269,8 @@ def download_update(
             _unlink_quietly(staged_path)
         raise UpdateError(f"No se pudo guardar la actualización: {exc}") from exc
     assert staged_path is not None
+    if progress_callback:
+        progress_callback("Descarga verificada correctamente", 1, 1)
     return staged_path
 
 
@@ -247,6 +278,45 @@ def _powershell_quote(path: Path) -> str:
     if any(character in str(path) for character in ("\x00", "\n", "\r")):
         raise UpdateError("La ruta de la aplicación no es compatible con el actualizador")
     return "'" + str(path).replace("'", "''") + "'"
+
+
+def verify_staged_update(staged_path: Path, *, timeout: int = 30) -> None:
+    """Ensure the packaged binary can load its runtime before replacing the app."""
+
+    try:
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        CONFIG_DIR.chmod(0o700)
+    except OSError as exc:
+        raise UpdateError(f"No se pudo preparar la validación de la actualización: {exc}") from exc
+
+    token = secrets.token_hex(16)
+    marker = CONFIG_DIR / f"moviu-self-test-{token}"
+    _unlink_quietly(marker)
+    environment = os.environ.copy()
+    environment["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+    environment["MOVIU_SELF_TEST_FILE"] = str(marker)
+    environment["MOVIU_SELF_TEST_TOKEN"] = token
+    try:
+        result = subprocess.run(
+            [str(staged_path), "--self-test"],
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=timeout,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        _unlink_quietly(marker)
+        raise UpdateError(f"No se pudo validar el ejecutable descargado: {exc}") from exc
+    try:
+        confirmed = marker.read_text(encoding="ascii") == token
+    except OSError:
+        confirmed = False
+    finally:
+        _unlink_quietly(marker)
+    if result.returncode != 0 or not confirmed:
+        raise UpdateError("El ejecutable descargado no superó la prueba de arranque segura")
 
 
 def _windows_update_script(
