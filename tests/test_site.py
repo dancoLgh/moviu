@@ -96,8 +96,11 @@ class GitHubPagesTest(unittest.TestCase):
 
     def test_pages_workflow_deploys_site_directory(self) -> None:
         workflow = (ROOT / ".github/workflows/pages.yml").read_text(encoding="utf-8")
+        push_paths = workflow.split("    paths:", 1)[1].split("  workflow_dispatch:", 1)[0]
         self.assertIn("actions/deploy-pages@v4", workflow)
         self.assertRegex(workflow, r"path:\s*site")
+        self.assertIn("moviu_server/config.py", push_paths)
+        self.assertIn("tests/test_site.py", push_paths)
         self.assertLess(
             workflow.index("python -m unittest tests.test_site"),
             workflow.index("actions/deploy-pages@v4"),
