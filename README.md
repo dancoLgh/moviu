@@ -22,6 +22,7 @@ Frente a alternativas como QZ Tray o JSPrintManager, Moviu propone una ruta enfo
 
 - Aplicacion de escritorio para configurar y supervisar el servidor.
 - API REST local protegida mediante `X-API-Key`.
+- Opción de impresión sin API key, limitada al equipo donde está instalado Moviu.
 - HTTPS con generacion, exportacion e instalacion guiada de una CA local.
 - Impresoras de red por TCP e impresoras instaladas en Windows.
 - Puente TCP a USB integrado para impresoras locales.
@@ -58,6 +59,10 @@ curl -k -X POST "https://127.0.0.1:9000/api/print" \
 ```
 
 En desarrollo puedes agregar `"simulate": true` para generar una vista previa sin enviar el trabajo a una impresora fisica.
+
+Para imprimir sin clave, activa **Permitir impresión sin API key** en **Conexión**. El cambio se guarda y reinicia los servicios activos automáticamente: la API, el portal de certificados y el puente USB quedan limitados a `127.0.0.1`, se deshabilitan los controles para habilitar la LAN y Moviu deja de anunciarse por mDNS. Envía las solicitudes desde ese equipo a `https://127.0.0.1:9000`, omitiendo `X-API-Key`. HTTPS sigue requiriendo confiar en la CA local. La impresora de destino puede seguir siendo local o de red.
+
+Al desactivar esta opción, vuelve a exigirse la API key existente. Para recibir trabajos desde otros dispositivos, configura **Host API** como `0.0.0.0`, guarda los cambios y habilita el acceso en la red local.
 
 ## Modos de impresion
 
@@ -129,8 +134,8 @@ python -m unittest discover -s tests
 Las releases se generan automaticamente al subir una etiqueta `v*`. Antes de crearla, actualiza `VERSION` en `moviu_server/config.py` y confirma que coincida con la etiqueta:
 
 ```bash
-git tag v1.4.3
-git push origin v1.4.3
+git tag v1.5.0
+git push origin v1.5.0
 ```
 
 GitHub Actions ejecuta las pruebas, compila Windows y Linux, genera las notas de la release y publica ambos binarios. Si alguna prueba o compilacion falla, la release no se crea.

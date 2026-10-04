@@ -2,6 +2,21 @@
 
 Todos los cambios notables en este proyecto serán documentados en este archivo.
 
+## [1.5.0] - 2026-10-04
+
+### Añadido
+- Opción «Permitir impresión sin API key» en Conexión, limitada al equipo donde está instalado Moviu.
+- Impresión, consulta de estado y listado de impresoras sin cabecera `X-API-Key` cuando está activo el modo local.
+
+### Mejorado
+- Al activar la impresión sin clave, la API HTTPS, el portal de certificados y el puente USB escuchan únicamente en `127.0.0.1`; se deshabilitan los controles de acceso por LAN y el anuncio mDNS.
+- Los servicios activos se reinician automáticamente al cambiar el modo de acceso. Al desactivarlo, se vuelve a exigir la API key existente.
+- La API verifica que las conexiones sin clave procedan de loopback e ignora las cabeceras de proxy para identificar al cliente.
+
+### Corregido
+- La configuración de `127.0.0.1` se conserva al reiniciar Moviu, sin convertirla automáticamente en acceso por LAN.
+- El puente USB descarta trabajos pendientes de conexiones anteriores después de detenerse.
+
 ## [1.4.3] - 2026-09-03
 
 ### Añadido

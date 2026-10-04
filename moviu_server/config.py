@@ -10,7 +10,7 @@ from typing import Optional
 
 CONFIG_DIR = Path.home() / ".moviu_printer"
 CONFIG_FILE = CONFIG_DIR / "config.json"
-VERSION = "1.4.3"
+VERSION = "1.5.0"
 
 
 @dataclass
@@ -20,6 +20,7 @@ class AppConfig:
     host: str = "0.0.0.0"
     port: int = 9000
     api_key: str = secrets.token_hex(16)
+    allow_without_api_key: bool = False
     printer_host: str = "127.0.0.1"
     printer_port: int = 9100
     printer_width: int = 576
@@ -35,6 +36,11 @@ class AppConfig:
     ssl_key_path: str = str(CONFIG_DIR / "key.pem")
     github_token: str = ""
 
+    @property
+    def bind_host(self) -> str:
+        """Unauthenticated access must always stay on the local machine."""
+        return "127.0.0.1" if self.allow_without_api_key else self.host
+
     @classmethod
     def from_dict(cls, data: Optional[dict]) -> "AppConfig":
         data = data or {}
@@ -42,14 +48,15 @@ class AppConfig:
         cut_margin_lines = int(data.get("cut_margin_lines", cls.cut_margin_lines))
         if not 0 <= cut_margin_lines <= 20:
             cut_margin_lines = cls.cut_margin_lines
-        # Migrate 127.0.0.1 to 0.0.0.0 to enable network access by default
-        if host == "127.0.0.1":
-            host = "0.0.0.0"
+        allow_without_api_key = bool(data.get("allow_without_api_key", False))
+        if allow_without_api_key:
+            host = "127.0.0.1"
 
         return cls(
             host=host,
             port=int(data.get("port", cls.port)),
             api_key=data.get("api_key", secrets.token_hex(16)),
+            allow_without_api_key=allow_without_api_key,
             printer_host=data.get("printer_host", cls.printer_host),
             printer_port=int(data.get("printer_port", cls.printer_port)),
             printer_width=int(data.get("printer_width", cls.printer_width)),

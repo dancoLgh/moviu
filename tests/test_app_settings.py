@@ -13,6 +13,9 @@ class Value:
     def get(self):
         return self.value
 
+    def set(self, value):
+        self.value = value
+
 
 def make_app(server_running: bool) -> DesktopApp:
     app = object.__new__(DesktopApp)
@@ -20,6 +23,11 @@ def make_app(server_running: bool) -> DesktopApp:
     thread = SimpleNamespace(is_alive=lambda: server_running) if server_running else None
     app.controller = SimpleNamespace(thread=thread)
     app.host_var = Value("0.0.0.0")
+    app.allow_without_api_key_var = Value(False)
+    app.bridge_controller = SimpleNamespace(server=None, start=MagicMock())
+    app.stop_bridge = MagicMock()
+    app.api_host_entry = MagicMock()
+    app.local_network_buttons = [MagicMock(), MagicMock()]
     app.port_var = Value("9001")
     app.printer_host_var = Value("192.168.1.50")
     app.printer_port_var = Value("9100")
@@ -41,6 +49,72 @@ def make_app(server_running: bool) -> DesktopApp:
 
 
 class SaveSettingsTests(unittest.TestCase):
+    @patch("moviu_server.app.messagebox.showinfo")
+    @patch("moviu_server.app.save_config")
+    def test_no_key_mode_forces_loopback_and_restarts_even_without_restart_flag(
+        self, save_config, _showinfo
+    ):
+        app = make_app(server_running=True)
+        app.allow_without_api_key_var.set(True)
+        original_key = app.config.api_key
+
+        self.assertTrue(app.save_settings(restart_running=False))
+
+        self.assertTrue(app.config.allow_without_api_key)
+        self.assertEqual(app.config.host, "127.0.0.1")
+        self.assertEqual(app.host_var.get(), "127.0.0.1")
+        self.assertEqual(app.config.api_key, original_key)
+        save_config.assert_called_once()
+        app.stop_server.assert_called_once()
+        app.start_server.assert_called_once()
+        app.api_host_entry.configure.assert_called_with(state="disabled")
+        for button in app.local_network_buttons:
+            button.configure.assert_called_with(state="disabled")
+
+    @patch("moviu_server.app.messagebox.showerror")
+    @patch("moviu_server.app.save_config")
+    def test_mode_change_aborts_before_persisting_if_server_cannot_stop(self, save_config, _error):
+        app = make_app(server_running=True)
+        app.allow_without_api_key_var.set(True)
+        app.stop_server.return_value = False
+
+        app._change_api_key_mode()
+
+        self.assertFalse(app.config.allow_without_api_key)
+        self.assertFalse(app.allow_without_api_key_var.get())
+        self.assertEqual(app.config.host, "0.0.0.0")
+        save_config.assert_not_called()
+        app.start_server.assert_not_called()
+
+    @patch("moviu_server.app.messagebox.showinfo")
+    @patch("moviu_server.app.save_config")
+    def test_active_bridge_is_rebound_when_no_key_mode_changes(self, _save, _info):
+        for enabled, host in ((True, "127.0.0.1"), (False, "0.0.0.0")):
+            with self.subTest(enabled=enabled):
+                app = make_app(server_running=False)
+                app.config.allow_without_api_key = not enabled
+                app.allow_without_api_key_var.set(enabled)
+                app.bridge_controller.server = SimpleNamespace(printer_name="USB", port=9100)
+
+                self.assertTrue(app.save_settings())
+
+                app.stop_bridge.assert_called_once()
+                app.bridge_controller.start.assert_called_once_with("USB", 9100, host=host)
+
+    @patch("moviu_server.app.messagebox.showinfo")
+    @patch("moviu_server.app.save_config")
+    def test_disabling_no_key_mode_restores_access_controls(self, _save, _info):
+        app = make_app(server_running=False)
+        app.config.allow_without_api_key = True
+        app.host_var.set("127.0.0.1")
+
+        self.assertTrue(app.save_settings())
+
+        self.assertFalse(app.config.allow_without_api_key)
+        app.api_host_entry.configure.assert_called_with(state="normal")
+        for button in app.local_network_buttons:
+            button.configure.assert_called_with(state="normal")
+
     def test_new_configuration_defaults_to_local_print_destination(self):
         self.assertEqual(AppConfig().printer_host, "127.0.0.1")
 
@@ -122,6 +196,19 @@ class CertificateUrlTests(unittest.TestCase):
 
 
 class NetworkAccessSettingsTests(unittest.TestCase):
+    @patch("moviu_server.app.messagebox.showerror")
+    @patch("moviu_server.app.open_local_network_ports")
+    def test_no_key_mode_prevents_opening_firewall(self, open_ports, showerror):
+        app = make_app(server_running=False)
+        app.allow_without_api_key_var.set(True)
+        app.save_settings = MagicMock()
+
+        app.enable_local_network_access()
+
+        open_ports.assert_not_called()
+        app.save_settings.assert_not_called()
+        showerror.assert_called_once()
+
     @patch("moviu_server.app.messagebox.showinfo")
     @patch("moviu_server.app.messagebox.askyesno", return_value=True)
     @patch("moviu_server.app.open_local_network_ports")
@@ -134,6 +221,7 @@ class NetworkAccessSettingsTests(unittest.TestCase):
         )
         app = object.__new__(DesktopApp)
         app.config = AppConfig(host="0.0.0.0", port=9001)
+        app.allow_without_api_key_var = Value(False)
         app.controller = SimpleNamespace(
             server=SimpleNamespace(config=SimpleNamespace(host="0.0.0.0", port=9000))
         )

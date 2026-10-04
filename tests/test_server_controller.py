@@ -8,6 +8,33 @@ from moviu_server.config import AppConfig
 
 
 class ServerControllerTests(unittest.TestCase):
+    @patch("moviu_server.app.ensure_certificates", return_value=(Path("cert.pem"), Path("key.pem")))
+    @patch("moviu_server.app.create_api")
+    @patch("moviu_server.app.create_certificate_api")
+    @patch("moviu_server.app.uvicorn.Config")
+    @patch("moviu_server.app.uvicorn.Server")
+    @patch("moviu_server.app.threading.Thread")
+    def test_no_key_mode_binds_both_listeners_to_loopback(
+        self, _thread, _server, config_class, _certificate_api, _api, _certs
+    ):
+        controller = ServerController(AppConfig(host="0.0.0.0", allow_without_api_key=True))
+
+        controller.start()
+
+        self.assertEqual(config_class.call_count, 2)
+        for configured in config_class.call_args_list:
+            self.assertEqual(configured.kwargs["host"], "127.0.0.1")
+        self.assertFalse(config_class.call_args_list[0].kwargs["proxy_headers"])
+
+    @patch("moviu_server.app.MoviuServiceAnnouncer")
+    def test_no_key_mode_is_not_announced_on_lan(self, announcer):
+        controller = ServerController(AppConfig(allow_without_api_key=True))
+        controller.server = SimpleNamespace(started=True)
+
+        controller.announce_mdns()
+
+        announcer.assert_not_called()
+
     @patch("moviu_server.app._suppress_windows_connection_reset_noise")
     @patch("moviu_server.app._ensure_streams")
     @patch("moviu_server.app.threading.Thread")

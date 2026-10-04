@@ -192,16 +192,17 @@ class ServerController:
         app = create_api(self.config)
         uvicorn_config = uvicorn.Config(
             app,
-            host=self.config.host,
+            host=self.config.bind_host,
             port=self.config.port,
             log_level="info",
             log_config=self._log_config(),
             ssl_certfile=str(cert_path),
             ssl_keyfile=str(key_path),
+            proxy_headers=False,
         )
         certificate_config = uvicorn.Config(
             create_certificate_api(self.config),
-            host=self.config.host,
+            host=self.config.bind_host,
             port=portal_port,
             log_level="info",
             log_config=self._log_config(),
@@ -221,6 +222,8 @@ class ServerController:
             raise
 
     def announce_mdns(self) -> None:
+        if not is_local_network_bind(self.config.bind_host):
+            return
         if self.mdns_announcer or not self.server or not self.server.started:
             return
         self.mdns_announcer = MoviuServiceAnnouncer(
@@ -357,7 +360,9 @@ class DesktopApp:
             sys.exit(0)
 
     def _build_ui(self) -> None:
-        self.host_var = tk.StringVar(value=self.config.host)
+        self.host_var = tk.StringVar(value=self.config.bind_host)
+        self.allow_without_api_key_var = tk.BooleanVar(value=self.config.allow_without_api_key)
+        self.local_network_buttons: list[ttk.Button] = []
         self.port_var = tk.StringVar(value=str(self.config.port))
         self.printer_host_var = tk.StringVar(value=self.config.printer_host)
         self.printer_port_var = tk.StringVar(value=str(self.config.printer_port))
@@ -503,6 +508,7 @@ class DesktopApp:
         )
         self.advanced_panel.grid(row=0, column=2, sticky="nsew")
         self._build_advanced_panel(self.advanced_panel)
+        self._update_access_controls()
         self.advanced_panel_visible = True
 
         self._show_page("home")
@@ -761,6 +767,18 @@ class DesktopApp:
         ttk.Button(api_actions, text="Regenerar", command=self.regenerate_api_key).pack(
             side=tk.LEFT, padx=(8, 0)
         )
+        ttk.Checkbutton(
+            api_card,
+            text="Permitir impresión sin API key",
+            variable=self.allow_without_api_key_var,
+            command=self._change_api_key_mode,
+        ).pack(anchor="w", pady=(14, 0))
+        ttk.Label(
+            api_card,
+            text="Solo este equipo. Al activarlo, se deshabilita el acceso desde la red local.",
+            style="Muted.TLabel",
+            wraplength=300,
+        ).pack(anchor="w", pady=(4, 0))
 
         cert_card = self._card(page)
         cert_card.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
@@ -768,7 +786,7 @@ class DesktopApp:
         ttk.Label(cert_card, text="Red y certificados", style="CardTitle.TLabel").grid(
             row=0, column=0, columnspan=2, sticky="w", pady=(0, 14)
         )
-        self._labeled_entry(
+        self.api_host_entry = self._labeled_entry(
             cert_card,
             1,
             "Host API",
@@ -793,9 +811,12 @@ class DesktopApp:
             ],
             start=3,
         ):
-            ttk.Button(cert_card, text=label, style="Outline.TButton", command=command).grid(
+            button = ttk.Button(cert_card, text=label, style="Outline.TButton", command=command)
+            button.grid(
                 row=row_index, column=0, columnspan=2, sticky="ew", pady=(8 if row_index == 3 else 3, 0)
             )
+            if command == self.enable_local_network_access:
+                self.local_network_buttons.append(button)
 
         footer = self._card(page, padding=(16, 12))
         footer.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(12, 0))
@@ -1054,11 +1075,13 @@ class DesktopApp:
             text="Ir a Conexión",
             command=lambda: self._show_page("connection"),
         ).pack(fill=tk.X)
-        ttk.Button(
+        network_button = ttk.Button(
             network,
             text="Habilitar acceso en la red local",
             command=self.enable_local_network_access,
-        ).pack(fill=tk.X, pady=(8, 0))
+        )
+        network_button.pack(fill=tk.X, pady=(8, 0))
+        self.local_network_buttons.append(network_button)
         ttk.Button(
             network,
             text="Retirar acceso del firewall",
@@ -1423,7 +1446,9 @@ class DesktopApp:
     def save_settings(self, notify: bool = True, restart_running: bool = True) -> bool:
         server_was_running = bool(self.controller.thread and self.controller.thread.is_alive())
         try:
-            host = self.host_var.get()
+            allow_without_api_key = self.allow_without_api_key_var.get()
+            mode_changed = allow_without_api_key != self.config.allow_without_api_key
+            host = "127.0.0.1" if allow_without_api_key else self.host_var.get()
             port = int(self.port_var.get())
             portal_port = certificate_http_port(port)
             printer_host = self.printer_host_var.get()
@@ -1458,7 +1483,20 @@ class DesktopApp:
             usb_bridge_autostart = self.bridge_autostart_var.get()
             github_token = self.github_token_var.get()
 
+            # Stop old listeners before changing authentication or network scope.
+            running_bridge = self.bridge_controller.server if mode_changed else None
+            if mode_changed and server_was_running:
+                if not self.stop_server():
+                    messagebox.showerror(
+                        "Configuración",
+                        "No se pudo detener el servidor para cambiar el modo de acceso. "
+                        "Cierra Moviu y vuelve a iniciarlo.",
+                    )
+                    return False
+            if running_bridge:
+                self.stop_bridge()
             self.config.host = host
+            self.config.allow_without_api_key = allow_without_api_key
             self.config.port = port
             self.config.printer_host = printer_host
             self.config.printer_port = printer_port
@@ -1473,9 +1511,16 @@ class DesktopApp:
             self.config.usb_bridge_autostart = usb_bridge_autostart
             self.config.github_token = github_token
             save_config(self.config)
+            self._update_access_controls()
             self._apply_autostart(self.config.auto_start, notify=notify)
-            if restart_running and server_was_running:
-                if not self.stop_server():
+            if running_bridge:
+                self.bridge_controller.start(
+                    running_bridge.printer_name,
+                    running_bridge.port,
+                    host="127.0.0.1" if allow_without_api_key else "0.0.0.0",
+                )
+            if (restart_running or mode_changed) and server_was_running:
+                if not mode_changed and not self.stop_server():
                     messagebox.showerror(
                         "Configuración",
                         "La configuración se guardó, pero el servidor anterior no pudo detenerse. "
@@ -1497,6 +1542,23 @@ class DesktopApp:
         except ValueError as exc:
             messagebox.showerror("Error", f"Configuración inválida: {exc}")
             return False
+        except OSError as exc:
+            logging.exception("No se pudo aplicar la configuración")
+            messagebox.showerror("Configuración", f"No se pudo aplicar la configuración: {exc}")
+            return False
+
+    def _update_access_controls(self) -> None:
+        local_only = self.allow_without_api_key_var.get()
+        if local_only:
+            self.host_var.set("127.0.0.1")
+        self.api_host_entry.configure(state="disabled" if local_only else "normal")
+        for button in self.local_network_buttons:
+            button.configure(state="disabled" if local_only else "normal")
+
+    def _change_api_key_mode(self) -> None:
+        if not self.save_settings():
+            self.allow_without_api_key_var.set(self.config.allow_without_api_key)
+            self._update_access_controls()
 
     def regenerate_api_key(self) -> None:
         from secrets import token_hex
@@ -1543,8 +1605,9 @@ class DesktopApp:
             return
 
         try:
-            self.bridge_controller.start(printer, port)
-            self._update_bridge_status(f"Escuchando en 0.0.0.0:{port} → {printer}")
+            host = "127.0.0.1" if self.config.allow_without_api_key else "0.0.0.0"
+            self.bridge_controller.start(printer, port, host=host)
+            self._update_bridge_status(f"Escuchando en {host}:{port} → {printer}")
             self.save_settings(notify=False, restart_running=False)
         except (OSError, ValueError) as exc:
             messagebox.showerror("Puente", f"No se pudo iniciar el puente: {exc}")
@@ -1823,6 +1886,12 @@ class DesktopApp:
         webbrowser.open(portal_url)
 
     def enable_local_network_access(self) -> None:
+        if self.allow_without_api_key_var.get():
+            messagebox.showerror(
+                "Acceso en red local",
+                "Desactiva la impresión sin API key antes de habilitar el acceso en red local.",
+            )
+            return
         running_bridge = self.bridge_controller.server
         running_bridge_port = int(running_bridge.port) if running_bridge else None
         if not self.save_settings(notify=False):

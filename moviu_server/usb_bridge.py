@@ -28,7 +28,7 @@ class UsbBridgeController:
         self.on_status = on_status
         self.server: PrinterServer | None = None
 
-    def start(self, printer_name: str, port: int) -> None:
+    def start(self, printer_name: str, port: int, host: str = "0.0.0.0") -> None:
         if self.server:
             return
 
@@ -39,9 +39,9 @@ class UsbBridgeController:
             )
 
         logger.info("Levantando puente TCP → USB en el puerto %d", port)
-        self.server = PrinterServer(printer_name, "0.0.0.0", port, self._notify_status)
+        self.server = PrinterServer(printer_name, host, port, self._notify_status)
         self.server.start()
-        self._notify_status(f"Escuchando en 0.0.0.0:{port}")
+        self._notify_status(f"Escuchando en {host}:{port}")
 
     def stop(self) -> None:
         if not self.server:

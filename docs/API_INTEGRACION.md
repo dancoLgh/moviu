@@ -16,9 +16,23 @@
 
 ## Autenticación
 
-- Todas las llamadas a la API, excepto `/api/discover`, deben incluir el header `X-API-Key: <API_KEY>`.
+- Por defecto, todas las llamadas a la API, excepto `/api/discover`, deben incluir el header `X-API-Key: <API_KEY>`.
 - El portal auxiliar `http://<host>:<puerto-api+1>/certificado` y su descarga de CA son públicos para permitir la instalación inicial. Nunca exponen claves privadas.
 - Si la API key es inválida la API devuelve `401 Unauthorized`.
+
+### Impresión sin API key desde el mismo equipo
+
+Activa **Permitir impresión sin API key** en la página **Conexión** de Moviu. La opción se persiste como `allow_without_api_key: true` en `config.json` y fuerza la API HTTPS, el portal HTTP y el puente USB a escuchar en `127.0.0.1`. Los servicios activos se reinician al cambiar el modo y se deshabilita el acceso por LAN y el anuncio mDNS.
+
+En este modo, `/api/print`, `/api/health` y `/api/printers` no requieren `X-API-Key`. El cliente debe ejecutarse en el equipo de Moviu y conectarse por loopback; una aplicación web puede hacerlo desde el navegador de ese equipo. Las conexiones de otros dispositivos no llegan al listener y la API rechaza con `403` cualquier cliente remoto que alcance los endpoints protegidos. Las cabeceras `X-Forwarded-For` no permiten eludir esta restricción.
+
+```bash
+curl -k -X POST "https://127.0.0.1:9000/api/print" \
+  -H "Content-Type: application/json" \
+  -d '{"mode":"raw_text","content":"Prueba local sin API key"}'
+```
+
+HTTPS y la configuración de la impresora de destino siguen vigentes. Al desactivar la opción se vuelve a exigir la clave existente; configura **Host API** como `0.0.0.0` y guarda para volver a recibir solicitudes por LAN.
 
 ---
 

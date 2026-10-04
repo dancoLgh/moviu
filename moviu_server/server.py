@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import ipaddress
 import logging
 from pathlib import Path
 from typing import Optional, Any
@@ -151,6 +152,8 @@ class PrintResponse(BaseModel):
 
 
 def create_api(config: AppConfig) -> FastAPI:
+    # Capture the mode for this listener; settings changes require a restart.
+    allow_without_api_key = config.allow_without_api_key
     processor = PrintProcessor(
         config.printer_host,
         config.printer_port,
@@ -163,7 +166,7 @@ def create_api(config: AppConfig) -> FastAPI:
     app = FastAPI(title="Moviu Print Server", version=VERSION)
 
     # ------------------------------------------------------------------
-    # CORS: permitir cualquier origen (no usamos cookies, solo X-API-Key)
+    # CORS: permitir aplicaciones web de cualquier origen, sin cookies.
     # ------------------------------------------------------------------
     app.add_middleware(
         CORSMiddleware,
@@ -173,7 +176,21 @@ def create_api(config: AppConfig) -> FastAPI:
         allow_headers=["*"],      # permite X-API-Key y demás headers
     )
 
-    def require_api_key(x_api_key: str = Header(..., alias="X-API-Key")) -> None:
+    def require_api_key(
+        request: Request,
+        x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    ) -> None:
+        if allow_without_api_key:
+            try:
+                peer = ipaddress.ip_address(request.client.host) if request.client else None
+            except ValueError:
+                peer = None
+            if peer is None or not peer.is_loopback:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="El modo sin API key solo permite conexiones desde este equipo",
+                )
+            return
         if x_api_key != config.api_key:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,

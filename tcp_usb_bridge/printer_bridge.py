@@ -171,7 +171,8 @@ class PrinterServer:
                 had_error = True
                 logger.exception("Error recibiendo datos de %s:%d", address[0], address[1])
 
-            if buffer and not had_error:
+            # A stopped bridge must not finish jobs from old LAN connections.
+            if buffer and not had_error and self._running:
                 try:
                     send_raw_to_printer(self.printer_name, bytes(buffer))
                 except Exception as exc:
