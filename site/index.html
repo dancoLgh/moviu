@@ -169,7 +169,7 @@
             <span class="step-number">02</span>
             <div class="step-icon"><i data-lucide="cable" aria-hidden="true"></i></div>
             <h3>Conectá</h3>
-            <p>Elegí la impresora, generá el certificado y copiá la URL y la API key desde el panel.</p>
+            <p>Elegí la impresora, generá el certificado y configurá el acceso con API key o sin clave desde el mismo equipo.</p>
           </article>
           <article class="step-card reveal">
             <span class="step-number">03</span>
@@ -259,12 +259,13 @@
         <div class="developer-copy reveal">
           <span class="section-kicker">PARA DESARROLLADORES</span>
           <h2>Una API que se explica sola.</h2>
-          <p>Un endpoint principal, autenticación por cabecera y payloads JSON. Usá el lenguaje y framework que ya tiene tu proyecto.</p>
+          <p>Un endpoint principal y payloads JSON. Usá API key para recibir trabajos por LAN o activá la impresión sin clave desde el equipo de Moviu.</p>
           <ul class="check-list">
             <li><i data-lucide="circle-check" aria-hidden="true"></i> REST sobre HTTPS local</li>
             <li><i data-lucide="circle-check" aria-hidden="true"></i> API key regenerable</li>
+            <li><i data-lucide="circle-check" aria-hidden="true"></i> Sin API key, solo desde este equipo</li>
             <li><i data-lucide="circle-check" aria-hidden="true"></i> Simulación sin hardware</li>
-            <li><i data-lucide="circle-check" aria-hidden="true"></i> Descubrimiento mDNS</li>
+            <li><i data-lucide="circle-check" aria-hidden="true"></i> Descubrimiento mDNS en modo LAN</li>
           </ul>
           <a class="button button-secondary" href="https://github.com/dancoLgh/moviu/blob/main/docs/API_INTEGRACION.md">Referencia completa</a>
         </div>
@@ -300,7 +301,7 @@
         <div>
           <span class="section-kicker">LOCAL Y BAJO TU CONTROL</span>
           <h2>La seguridad no desaparece. Se vuelve manejable.</h2>
-          <p>Moviu genera una CA local, protege la API con una clave y permite exportar el certificado desde la interfaz. Tus trabajos y credenciales permanecen en tu red.</p>
+          <p>Moviu genera una CA local y permite exportar el certificado desde la interfaz. El acceso por LAN requiere API key. Si activás el modo sin clave, solo el equipo donde está instalado Moviu puede enviarle impresiones.</p>
         </div>
         <div class="security-points">
           <span><i data-lucide="lock-keyhole" aria-hidden="true"></i> HTTPS local</span>

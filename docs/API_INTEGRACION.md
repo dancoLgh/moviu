@@ -3,13 +3,13 @@
 ## Resumen rápido
 
 - Servidor HTTPS local que expone una API REST para enviar trabajos de impresión.
-- Autenticación mediante `X-API-Key` en cabecera.
+- Autenticación mediante `X-API-Key` en cabecera por defecto; opción sin clave limitada al mismo equipo desde v1.5.0.
 - Endpoints principales: `POST /api/print`, `GET /api/health`, `GET /api/printers`, `GET /api/discover`.
 - Soporta modos: `html`, `image`, `pdf`, `raw`, `raw_text`, `hybrid`, `zpl`.
 
 ## Requisitos
 
-- La aplicación corre localmente (por defecto en `https://127.0.0.1:9000`).
+- Para conectar desde el equipo de Moviu, utiliza `https://127.0.0.1:9000`. Para conectar por LAN, utiliza la IP real de ese equipo y habilita el acceso de red con API key.
 - El servidor genera una CA local (`ca_cert.pem`) y firma con ella el certificado HTTPS del servidor; instala esa CA en tablets/clientes para confiar en la conexión.
 - En entornos de desarrollo puedes usar `-k` en `curl` o `verify=False` en `requests` si aún no instalas la CA.
 - La API Key se persiste en el archivo de configuración (`~/.moviu_printer/config.json`).
@@ -32,7 +32,15 @@ curl -k -X POST "https://127.0.0.1:9000/api/print" \
   -d '{"mode":"raw_text","content":"Prueba local sin API key"}'
 ```
 
-HTTPS y la configuración de la impresora de destino siguen vigentes. Al desactivar la opción se vuelve a exigir la clave existente; configura **Host API** como `0.0.0.0` y guarda para volver a recibir solicitudes por LAN.
+HTTPS y la configuración de la impresora de destino siguen vigentes. Al desactivar la opción se vuelve a exigir la clave existente y se conserva el host local; configura **Host API** como `0.0.0.0`, guarda y habilita el acceso en la red local para volver a recibir solicitudes por LAN.
+
+| Modo | Cliente | URL de ejemplo | `X-API-Key` |
+|---|---|---|---|
+| Sin clave | Programa o navegador en el equipo de Moviu | `https://127.0.0.1:9000` | Omitido |
+| Con clave, local | Programa o navegador en el equipo de Moviu | `https://127.0.0.1:9000` | Obligatorio |
+| Con clave, LAN | Dispositivo de la red local | `https://192.168.1.100:9000` | Obligatorio |
+
+Una página web puede estar alojada en otro servidor: lo que debe ejecutarse en el mismo equipo de Moviu es el navegador que envía la solicitud. Para una integración desde un backend, ese proceso también debe ejecutarse en el equipo de Moviu. `127.0.0.1` siempre se refiere al equipo del cliente.
 
 ---
 
@@ -94,18 +102,19 @@ CORS preflight o comprobación rápida.
 
 Enviar un trabajo de impresión.
 
-**Headers:** `X-API-Key`, `Content-Type: application/json`
+**Headers:** `Content-Type: application/json`. `X-API-Key` es obligatorio salvo en el modo local sin clave.
 
 **Respuestas:**
 - `200` con `PrintResponse`
 - `400` si el trabajo no es procesable
-- `401` si API key inválida
+- `401` si la API key falta o es inválida en el modo con clave
+- `403` si un cliente remoto alcanza este endpoint en el modo sin clave
 
 ### GET /api/health
 
 Verificar estado del servidor.
 
-**Headers:** `X-API-Key`
+**Headers:** `X-API-Key`, salvo en el modo local sin clave.
 
 **Respuesta:** `200 { "status": "ok" }`
 
@@ -113,7 +122,7 @@ Verificar estado del servidor.
 
 Listar impresoras instaladas en el sistema.
 
-**Headers:** `X-API-Key`
+**Headers:** `X-API-Key`, salvo en el modo local sin clave.
 
 **Respuesta:**
 ```json
@@ -127,6 +136,8 @@ Listar impresoras instaladas en el sistema.
 
 Descubrir servidores Moviu en la red local (mDNS). **No requiere autenticación.**
 
+En el modo sin clave, este endpoint solo es accesible desde el equipo de Moviu y puede buscar otros servidores de la LAN. El propio servidor sin clave no se anuncia por mDNS.
+
 **Query params:** `timeout` (float, default: 3.0)
 
 **Respuesta:**
@@ -137,7 +148,7 @@ Descubrir servidores Moviu en la red local (mDNS). **No requiere autenticación.
       "name": "Moviu Print Server._moviu-print._tcp.local.",
       "port": 9000,
       "addresses": ["192.168.1.156"],
-      "properties": {"version": "1.4.3", "api_version": "1.0", "protocol": "https"}
+      "properties": {"version": "1.5.0", "api_version": "1.0", "protocol": "https"}
     }
   ],
   "count": 1
@@ -301,6 +312,8 @@ Comandos ZPL enviados directamente.
 
 ## Ejemplos prácticos
 
+Los siguientes ejemplos con `X-API-Key` corresponden al modo con clave. Para el modo sin clave, consulta [Ejemplos sin API key](#ejemplos-sin-api-key).
+
 ### cURL - HTML
 
 ```bash
@@ -388,6 +401,55 @@ fetch(url, {
 
 ---
 
+## Ejemplos sin API key
+
+Activa **Permitir impresión sin API key** antes de usar estos ejemplos. Ejecútalos desde el equipo donde está instalado Moviu. Usan `simulate: true` para comprobar la integración sin enviar papel; omítelo o cámbialo a `false` para imprimir.
+
+### cURL con la CA local
+
+```bash
+curl --cacert "$HOME/.moviu_printer/ca_cert.pem" \
+  -X POST "https://127.0.0.1:9000/api/print" \
+  -H "Content-Type: application/json" \
+  -d '{"mode":"raw_text","content":"Prueba sin API key","simulate":true}'
+```
+
+### Python - requests
+
+```python
+from pathlib import Path
+import requests
+
+response = requests.post(
+    "https://127.0.0.1:9000/api/print",
+    json={"mode": "raw_text", "content": "Prueba sin API key", "simulate": True},
+    verify=str(Path.home() / ".moviu_printer" / "ca_cert.pem"),
+    timeout=30,
+)
+response.raise_for_status()
+print(response.json())
+```
+
+### JavaScript - fetch desde el navegador local
+
+Instala la CA de Moviu en el equipo o navegador antes de ejecutar la llamada HTTPS.
+
+```javascript
+const response = await fetch('https://127.0.0.1:9000/api/print', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    mode: 'raw_text',
+    content: 'Prueba sin API key',
+    simulate: true
+  })
+});
+if (!response.ok) throw new Error(`HTTP ${response.status}`);
+console.log(await response.json());
+```
+
+La página web puede estar alojada fuera del equipo de Moviu, pero debe abrirse en su navegador local. Si se abre desde una tablet u otra PC, `127.0.0.1` apunta a ese dispositivo y no al equipo de Moviu.
+
 ## Simulación y previsualización
 
 - Si `simulate: true` o la configuración tiene `simulate_printer = true`, no se envía a la impresora.
@@ -399,6 +461,20 @@ fetch(url, {
 ## Puente TCP → USB
 
 Recibe bytes crudos por TCP y los envía a una impresora USB local.
+
+El puente integrado en Moviu sigue disponible cuando está activo el modo sin API key y escucha únicamente en `127.0.0.1`. Activa **Habilitar puente**, selecciona la impresora USB y pulsa **Iniciar**. Su puerto sigue siendo el configurado en **Puente USB** (por defecto `9100`). El protocolo TCP crudo no utiliza cabeceras HTTP ni `X-API-Key`.
+
+Para enviar un trabajo de la API sin clave explícitamente a ese puente, incluye el destino TCP local:
+
+```json
+{
+  "mode": "raw_text",
+  "content": "Prueba por puente USB\n",
+  "printer": {"host": "127.0.0.1", "port": 9100}
+}
+```
+
+Envía el JSON con `Content-Type: application/json` a `https://127.0.0.1:9000/api/print` desde el equipo de Moviu, sin `X-API-Key`. Reemplaza los puertos si cambiaste su configuración. También puedes enviar bytes directamente al puente:
 
 ```python
 import socket
@@ -414,7 +490,9 @@ with socket.create_connection(("127.0.0.1", 9100), timeout=5) as s:
 | Código | Causa |
 |--------|-------|
 | `400` | Contenido inválido (base64 mal formado, code page desconocida) |
-| `401` | API Key ausente o incorrecta |
+| `401` | API key ausente o incorrecta en el modo con clave |
+| `403` | Cliente remoto rechazado en el modo local sin clave |
+| Sin respuesta HTTP | Comprueba que Moviu esté iniciado, que la URL y el puerto sean correctos y que el modo elegido permita acceso desde el equipo cliente |
 | `500` | Error interno (revisar logs en `~/.moviu_printer/app.log`) |
 
 ---

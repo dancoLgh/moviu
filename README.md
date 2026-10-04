@@ -44,7 +44,7 @@ Consulta la [guia de instalacion](docs/INSTALLATION.md) para el primer inicio, c
 ## Tres pasos
 
 1. Instala Moviu y configura tu impresora local o de red.
-2. Inicia el servidor y copia la URL HTTPS y la API key.
+2. Elige en **Conexión** si usarás API key o impresión sin clave desde el mismo equipo. Inicia el servidor y copia la URL HTTPS; copia también la clave si el modo la requiere.
 3. Envia el trabajo desde tu aplicacion.
 
 ```bash
@@ -64,6 +64,8 @@ Para imprimir sin clave, activa **Permitir impresión sin API key** en **Conexi�
 
 Al desactivar esta opción, vuelve a exigirse la API key existente. Para recibir trabajos desde otros dispositivos, configura **Host API** como `0.0.0.0`, guarda los cambios y habilita el acceso en la red local.
 
+Consulta la [configuración paso a paso](docs/INSTALLATION.md#imprimir-sin-api-key-desde-este-equipo) y los [ejemplos sin clave para cURL, Python y JavaScript](docs/API_INTEGRACION.md#ejemplos-sin-api-key). En aplicaciones web, el navegador que envía la impresión debe estar en el equipo de Moviu aunque la página esté alojada en otro servidor.
+
 ## Modos de impresion
 
 | Modo | Uso principal | Destino |
@@ -82,7 +84,7 @@ La referencia completa de payloads, respuestas, tamanos de papel y errores esta 
 
 ```mermaid
 flowchart LR
-    A[Aplicacion web] -->|HTTPS + API key| B[Moviu Print Server]
+    A[Aplicacion web] -->|HTTPS| B[Moviu Print Server]
     B --> C[Impresora de red]
     B --> D[Impresora del sistema]
     B --> E[Puente TCP a USB]
@@ -91,12 +93,14 @@ flowchart LR
 
 Moviu se ejecuta en la misma red que las impresoras. La aplicacion web envia trabajos a la API local y Moviu se ocupa de renderizar, adaptar y enrutar el contenido.
 
+La API exige clave por defecto. En el modo sin clave, solo acepta solicitudes desde el mismo equipo por loopback; la impresora de destino puede seguir estando en la red.
+
 ## Seguridad y certificados
 
 - Cada instalacion genera una API key local que puede regenerarse.
 - La comunicacion usa HTTPS con una CA creada por Moviu.
 - La interfaz permite exportar esa CA para instalarla en los dispositivos cliente.
-- El portal publico usa HTTP en `http://<ip-local>:<puerto-HTTPS + 1>/certificado`. Por ejemplo, con la API en `https://192.168.1.20:9000`, la guia queda en `http://192.168.1.20:9001/certificado`.
+- El portal público usa HTTP en `http://<host>:<puerto-HTTPS + 1>/certificado`. En modo LAN, con la API en `https://192.168.1.20:9000`, la guía queda en `http://192.168.1.20:9001/certificado`; en modo sin clave, se abre desde el mismo equipo en `http://127.0.0.1:9001/certificado`.
 - El listener HTTP solo expone la guia y la descarga de la CA; la API de impresion permanece exclusivamente en HTTPS.
 - Los certificados y la configuracion permanecen en `~/.moviu_printer/`.
 - El servicio esta pensado para redes locales confiables, no para exposicion directa a Internet.

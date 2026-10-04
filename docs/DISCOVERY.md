@@ -1,6 +1,14 @@
 # Descubrimiento de servidores Moviu
 
-Moviu se anuncia en la red local mediante mDNS/DNS-SD con el servicio `_moviu-print._tcp.local.`. Los clientes compatibles con Bonjour o Avahi pueden localizar el servidor sin conocer previamente su direccion IP.
+Cuando la API está configurada para recibir conexiones por LAN, Moviu se anuncia en la red local mediante mDNS/DNS-SD con el servicio `_moviu-print._tcp.local.`. Los clientes compatibles con Bonjour o Avahi pueden localizar el servidor sin conocer previamente su dirección IP.
+
+## Modo local sin API key
+
+Con **Conexión → Permitir impresión sin API key** activo, Moviu escucha únicamente en `127.0.0.1` y no publica anuncios mDNS. Por eso no aparece en `discover.py` ni en las búsquedas de otros dispositivos de la LAN. Desde el equipo donde está instalado, utiliza directamente `https://127.0.0.1:9000`; cambia el puerto si configuraste otro.
+
+`GET /api/discover` sigue disponible desde ese equipo para buscar otros servidores que sí se anuncian en la LAN. El endpoint no publica ni habilita el acceso al propio servidor local.
+
+Para volver a anunciar Moviu en la LAN, desactiva la opción sin clave, configura **Host API** como `0.0.0.0`, guarda e inicia el servidor si está detenido. Los clientes descubiertos deberán utilizar la API key. Consulta la [guía de configuración de acceso](INSTALLATION.md#volver-a-recibir-trabajos-desde-la-lan).
 
 ## Endpoint HTTP
 
@@ -20,7 +28,7 @@ Respuesta de ejemplo:
       "port": 9000,
       "addresses": ["192.168.1.156"],
       "properties": {
-        "version": "1.4.3",
+        "version": "1.5.0",
         "protocol": "https",
         "hostname": "DESKTOP-ABC123"
       }

@@ -4,6 +4,12 @@ Pequeña utilidad de escritorio para Windows que escucha peticiones TCP en un pu
 
 > Nota: el envío real a la impresora requiere Windows con `pywin32`. En otros sistemas operativos la aplicación guarda los trabajos en `~/.tcp_usb_bridge/simulated_jobs/job.bin` para facilitar el desarrollo.
 
+## Puente integrado en Moviu
+
+Moviu incluye este puente en su panel **Puente USB**. Sigue disponible al activar **Conexión → Permitir impresión sin API key**: habilita el puente, selecciona la impresora USB y pulsa **Iniciar**. El puente integrado queda limitado a `127.0.0.1`, por lo que únicamente los programas del equipo de Moviu pueden enviar bytes a su puerto. Un puente activo se reinicia al cambiar ese modo.
+
+El protocolo TCP crudo no utiliza `X-API-Key`; la restricción se aplica a la dirección donde escucha. Esta opción pertenece a Moviu y no cambia la configuración de la utilidad independiente iniciada con `python -m tcp_usb_bridge`, descrita a continuación. Consulta la [guía de acceso local de Moviu](../docs/INSTALLATION.md#imprimir-sin-api-key-desde-este-equipo).
+
 ## Estructura
 
 - `tcp_usb_bridge/printer_bridge.py`: servidor TCP y funciones de envío a impresora.
