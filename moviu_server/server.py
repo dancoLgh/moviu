@@ -6,7 +6,7 @@ import base64
 import ipaddress
 import logging
 from pathlib import Path
-from typing import Optional, Any
+from typing import Optional, Any, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -106,6 +106,11 @@ class PrintRequest(BaseModel):
         None,
         description="Tamaño de hoja para PDF local (A4, Letter, Legal, A5, etc. o código DMPAPER numérico)"
     )
+    orientation: Optional[Literal['portrait', 'landscape']] = Field(
+        None,
+        description="Orientación de hoja para PDF local: portrait (vertical) o landscape (horizontal). "
+                    "Si se omite, conserva la configuración de la impresora.",
+    )
     paper_width_mm: Optional[float] = Field(
         None,
         gt=0,
@@ -145,6 +150,7 @@ class PrintResponse(BaseModel):
     printer: Optional[str] = Field(None, description="Nombre de impresora local (para modo pdf)")
     pages: Optional[int] = Field(None, description="Paginas impresas (para modo pdf)")
     paper_size: Optional[str] = Field(None, description="Tamano de hoja aplicado (para modo pdf)")
+    orientation: Optional[str] = Field(None, description="Orientación de hoja aplicada (para modo pdf)")
     paper_width_mm: Optional[float] = Field(None, description="Ancho de hoja aplicado en mm (para modo pdf)")
     paper_height_mm: Optional[float] = Field(None, description="Alto de hoja aplicado en mm (para modo pdf)")
     message: Optional[str] = Field(None, description="Mensaje descriptivo")
@@ -246,6 +252,7 @@ def create_api(config: AppConfig) -> FastAPI:
                             paper_size=request.paper_size,
                             paper_width_mm=request.paper_width_mm,
                             paper_height_mm=request.paper_height_mm,
+                            orientation=request.orientation,
                         )
                 except SystemPrinterError as exc:
                     LOGGER.exception("System print job failed")

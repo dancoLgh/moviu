@@ -137,6 +137,7 @@ def print_pdf_to_system_printer(
     paper_size: Optional[str] = None,
     paper_width_mm: Optional[float] = None,
     paper_height_mm: Optional[float] = None,
+    orientation: Optional[str] = None,
 ) -> dict:
     """Print a PDF to a system printer (laser, inkjet, etc.).
 
@@ -149,10 +150,13 @@ def print_pdf_to_system_printer(
         paper_size: Paper size alias (A4, Letter, Legal, etc.) or numeric DMPAPER code.
         paper_width_mm: Custom paper width in mm (must be sent with paper_height_mm).
         paper_height_mm: Custom paper height in mm (must be sent with paper_width_mm).
+        orientation: portrait or landscape; None keeps the printer default.
 
     Returns:
         dict with status and details.
     """
+    if orientation not in (None, 'portrait', 'landscape'):
+        raise SystemPrinterError("orientation debe ser portrait o landscape")
     has_custom_width = paper_width_mm is not None
     has_custom_height = paper_height_mm is not None
     if has_custom_width != has_custom_height:
@@ -178,6 +182,8 @@ def print_pdf_to_system_printer(
         }
         if paper_size is not None:
             result["paper_size"] = paper_size
+        if orientation is not None:
+            result["orientation"] = orientation
         if has_custom_width and has_custom_height:
             result["paper_width_mm"] = paper_width_mm
             result["paper_height_mm"] = paper_height_mm
@@ -217,7 +223,7 @@ def print_pdf_to_system_printer(
         )
 
     configured_devmode = None
-    if paper_size_code is not None or (
+    if orientation is not None or paper_size_code is not None or (
         custom_paper_width_tenths is not None and custom_paper_height_tenths is not None
     ):
         try:
@@ -232,7 +238,7 @@ def print_pdf_to_system_printer(
                     devmode.PaperSize = paper_size_code
                     if hasattr(win32con, "DM_PAPERSIZE"):
                         devmode.Fields |= win32con.DM_PAPERSIZE
-                else:
+                elif has_custom_width:
                     if not hasattr(win32con, "DM_PAPERWIDTH") or not hasattr(win32con, "DM_PAPERLENGTH"):
                         raise SystemPrinterError(
                             "El sistema no soporta ajuste de tamaño personalizado (DM_PAPERWIDTH/DM_PAPERLENGTH)"
@@ -244,11 +250,18 @@ def print_pdf_to_system_printer(
                     devmode.PaperLength = custom_paper_height_tenths
                     devmode.Fields |= win32con.DM_PAPERWIDTH | win32con.DM_PAPERLENGTH
 
+                if orientation is not None:
+                    devmode.Orientation = (
+                        win32con.DMORIENT_LANDSCAPE if orientation == 'landscape'
+                        else win32con.DMORIENT_PORTRAIT
+                    )
+                    devmode.Fields |= win32con.DM_ORIENTATION
+
                 configured_devmode = devmode
             finally:
                 win32print.ClosePrinter(handle)
         except Exception as exc:
-            raise SystemPrinterError(f"Error al configurar tamaño de hoja: {exc}") from exc
+            raise SystemPrinterError(f"Error al configurar tamaño u orientación de hoja: {exc}") from exc
 
         if paper_size_code is not None:
             logger.info(
@@ -257,7 +270,7 @@ def print_pdf_to_system_printer(
                 paper_size,
                 paper_size_code,
             )
-        else:
+        elif has_custom_width:
             logger.info(
                 "Tamaño de hoja personalizado para %s: %.2fmm x %.2fmm",
                 target_printer,
@@ -332,6 +345,8 @@ def print_pdf_to_system_printer(
         }
         if paper_size is not None:
             result["paper_size"] = paper_size
+        if orientation is not None:
+            result["orientation"] = orientation
         if has_custom_width and has_custom_height:
             result["paper_width_mm"] = paper_width_mm
             result["paper_height_mm"] = paper_height_mm

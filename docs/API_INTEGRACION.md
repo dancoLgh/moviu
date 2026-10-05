@@ -64,6 +64,7 @@ Una página web puede estar alojada en otro servidor: lo que debe ejecutarse en 
 | `code_page` | string | Para `raw_text`: cp437, cp850, cp858, cp1252, etc. |
 | `dpi` | int | Para `pdf` con `printer.name`: resolución 72-600 (default: 150) |
 | `paper_size` | string | Para `pdf` con `printer.name` y `raw_mode=false`: A4, Letter, Legal, etc. o código DMPAPER |
+| `orientation` | string | Para PDF local renderizado: `portrait` (vertical) o `landscape` (horizontal). Omitir conserva la orientación del controlador. |
 | `paper_width_mm` | float | Para `pdf` con `printer.name` y `raw_mode=false`: ancho personalizado en mm (requiere `paper_height_mm`) |
 | `paper_height_mm` | float | Para `pdf` con `printer.name` y `raw_mode=false`: alto personalizado en mm (requiere `paper_width_mm`) |
 | `raw_mode` | bool | Para `pdf` con `printer.name`: enviar PDF directo sin renderizar |
@@ -83,6 +84,7 @@ Una página web puede estar alojada en otro servidor: lo que debe ejecutarse en 
 | `printer` | string | Nombre de impresora local (modo `pdf`) |
 | `pages` | int | Páginas impresas (modo `pdf` local) |
 | `paper_size` | string | Tamaño de hoja aplicado (modo `pdf` renderizado) |
+| `orientation` | string | Orientación aplicada al trabajo PDF local, si se solicitó. |
 | `paper_width_mm` | float | Ancho personalizado aplicado en mm |
 | `paper_height_mm` | float | Alto personalizado aplicado en mm |
 | `message` | string | Mensaje descriptivo |
@@ -249,6 +251,7 @@ El modo `pdf` detecta automáticamente el destino y el tipo de envío:
 |--------|-------------|
 | `dpi` | Resolución para renderizado: 72-600 (default: 150). Solo aplica cuando `raw_mode=false` |
 | `paper_size` | Tamaño de hoja para renderizado local (`A4`, `A5`, `Letter`, `Legal`, `Tabloid`, `Executive`, `B5`, `carta`, `oficio` o código `DMPAPER`) |
+| `orientation` | `portrait` o `landscape`. Se aplica al trabajo en Windows sin modificar la configuración global de la impresora. No cambia el diseño del PDF; cada página se ajusta al área imprimible. |
 | `paper_width_mm` | Ancho personalizado en mm para renderizado local |
 | `paper_height_mm` | Alto personalizado en mm para renderizado local |
 
