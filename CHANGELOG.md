@@ -2,6 +2,21 @@
 
 Todos los cambios notables en este proyecto serán documentados en este archivo.
 
+## [1.6.0] - 2026-10-05
+
+### Añadido
+- Orientación vertical (`portrait`) u horizontal (`landscape`) por trabajo en la API de impresión PDF para impresoras del sistema en Windows.
+- Compatibilidad de la orientación con tamaños estándar, incluido A5, y medidas personalizadas en milímetros.
+
+### Mejorado
+- La orientación se aplica únicamente al trabajo enviado, sin modificar la configuración global de la impresora. Si se omite, se conserva la orientación del controlador.
+- La API valida la orientación solicitada y devuelve la orientación aplicada en la respuesta.
+- Documentación de integración y página de descargas actualizadas para la nueva versión.
+
+### Integración con Odoo
+- El módulo `direct_print_backoffice_moviu` de Odoo 19, versión `19.0.1.0.3`, permite seleccionar A5 y orientación, y corrige el botón «Imprimir Directo» para respetar el reporte asignado, como KuDE.
+- Es necesario actualizar también el módulo de Odoo para disponer de esos controles. El tamaño y la orientación ajustan el PDF a la hoja; no rediseñan la plantilla del reporte.
+
 ## [1.5.0] - 2026-10-04
 
 ### Añadido

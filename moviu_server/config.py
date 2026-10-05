@@ -10,7 +10,7 @@ from typing import Optional
 
 CONFIG_DIR = Path.home() / ".moviu_printer"
 CONFIG_FILE = CONFIG_DIR / "config.json"
-VERSION = "1.5.0"
+VERSION = "1.6.0"
 
 
 @dataclass
