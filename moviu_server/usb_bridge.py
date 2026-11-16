@@ -39,8 +39,13 @@ class UsbBridgeController:
             )
 
         logger.info("Levantando puente TCP → USB en el puerto %d", port)
-        self.server = PrinterServer(printer_name, host, port, self._notify_status)
-        self.server.start()
+        server = PrinterServer(printer_name, host, port, self._notify_status)
+        try:
+            server.start()
+        except Exception:
+            server.stop()
+            raise
+        self.server = server
         self._notify_status(f"Escuchando en {host}:{port}")
 
     def stop(self) -> None:

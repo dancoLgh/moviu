@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from .certificate_portal import render_certificate_portal
 from .certs import ca_certificate_path, certificate_sha256_fingerprint
 from .config import AppConfig, VERSION
+from .network_access import is_local_network_bind
 from .printer import PrintJob, PrintProcessor, PrinterError
 from .usb_bridge import discover_printers
 from .system_printer import (
@@ -160,6 +161,7 @@ class PrintResponse(BaseModel):
 def create_api(config: AppConfig) -> FastAPI:
     # Capture the mode for this listener; settings changes require a restart.
     allow_without_api_key = config.allow_without_api_key
+    local_only = not is_local_network_bind(config.bind_host)
     processor = PrintProcessor(
         config.printer_host,
         config.printer_port,
@@ -186,6 +188,8 @@ def create_api(config: AppConfig) -> FastAPI:
         request: Request,
         x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
     ) -> None:
+        if allow_without_api_key and not local_only:
+            return
         if allow_without_api_key:
             try:
                 peer = ipaddress.ip_address(request.client.host) if request.client else None

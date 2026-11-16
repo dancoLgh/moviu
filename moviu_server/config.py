@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import json
 import secrets
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Optional
 
 CONFIG_DIR = Path.home() / ".moviu_printer"
 CONFIG_FILE = CONFIG_DIR / "config.json"
-VERSION = "1.6.0"
+VERSION = "1.7.0"
 
 
 @dataclass
@@ -19,7 +20,7 @@ class AppConfig:
 
     host: str = "0.0.0.0"
     port: int = 9000
-    api_key: str = secrets.token_hex(16)
+    api_key: str = field(default_factory=lambda: secrets.token_hex(16))
     allow_without_api_key: bool = False
     printer_host: str = "127.0.0.1"
     printer_port: int = 9100
@@ -28,6 +29,10 @@ class AppConfig:
     cut_margin_lines: int = 2
     simulate_printer: bool = False
     auto_start: bool = False
+    server_autostart: bool = False
+    setup_completed: bool = False
+    configuration_template: str = ""
+    default_interface_mode: str = "simple"
     usb_bridge_enabled: bool = False
     usb_bridge_port: int = 9100
     usb_bridge_printer: str = ""
@@ -38,8 +43,8 @@ class AppConfig:
 
     @property
     def bind_host(self) -> str:
-        """Unauthenticated access must always stay on the local machine."""
-        return "127.0.0.1" if self.allow_without_api_key else self.host
+        """Network scope is independent of whether an API key is required."""
+        return self.host
 
     @classmethod
     def from_dict(cls, data: Optional[dict]) -> "AppConfig":
@@ -49,9 +54,9 @@ class AppConfig:
         if not 0 <= cut_margin_lines <= 20:
             cut_margin_lines = cls.cut_margin_lines
         allow_without_api_key = bool(data.get("allow_without_api_key", False))
-        if allow_without_api_key:
-            host = "127.0.0.1"
-
+        default_interface_mode = data.get("default_interface_mode", "advanced")
+        if default_interface_mode not in {"simple", "advanced"}:
+            default_interface_mode = "advanced"
         return cls(
             host=host,
             port=int(data.get("port", cls.port)),
@@ -64,6 +69,12 @@ class AppConfig:
             cut_margin_lines=cut_margin_lines,
             simulate_printer=bool(data.get("simulate_printer", cls.simulate_printer)),
             auto_start=bool(data.get("auto_start", cls.auto_start)),
+            server_autostart=bool(data.get("server_autostart", False)),
+            # Configurations saved before the wizard already belong to a
+            # configured installation. Never replace them on an upgrade.
+            setup_completed=bool(data.get("setup_completed", True)),
+            configuration_template=data.get("configuration_template", ""),
+            default_interface_mode=default_interface_mode,
             usb_bridge_enabled=bool(data.get("usb_bridge_enabled", cls.usb_bridge_enabled)),
             usb_bridge_port=int(data.get("usb_bridge_port", cls.usb_bridge_port)),
             usb_bridge_printer=data.get("usb_bridge_printer", cls.usb_bridge_printer),
@@ -93,5 +104,14 @@ def save_config(config: AppConfig) -> None:
     """Persist configuration to disk."""
 
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    with CONFIG_FILE.open("w", encoding="utf-8") as fh:
-        json.dump(asdict(config), fh, indent=2)
+    temporary_path = None
+    try:
+        with NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=CONFIG_DIR, delete=False
+        ) as fh:
+            temporary_path = Path(fh.name)
+            json.dump(asdict(config), fh, indent=2)
+        temporary_path.replace(CONFIG_FILE)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)

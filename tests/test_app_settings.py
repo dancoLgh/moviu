@@ -36,6 +36,8 @@ def make_app(server_running: bool) -> DesktopApp:
     app.cut_margin_lines_var = Value("5")
     app.simulate_var = Value(True)
     app.auto_start_var = Value(False)
+    app.server_autostart_var = Value(False)
+    app.default_interface_mode_var = Value("simple")
     app.bridge_enabled_var = Value(False)
     app.bridge_port_var = Value("9100")
     app.bridge_printer_var = Value("")
@@ -49,9 +51,14 @@ def make_app(server_running: bool) -> DesktopApp:
 
 
 class SaveSettingsTests(unittest.TestCase):
+    def setUp(self):
+        warning = patch("moviu_server.app.messagebox.showwarning")
+        self.warning = warning.start()
+        self.addCleanup(warning.stop)
+
     @patch("moviu_server.app.messagebox.showinfo")
     @patch("moviu_server.app.save_config")
-    def test_no_key_mode_forces_loopback_and_restarts_even_without_restart_flag(
+    def test_no_key_mode_preserves_lan_and_restarts_even_without_restart_flag(
         self, save_config, _showinfo
     ):
         app = make_app(server_running=True)
@@ -61,15 +68,17 @@ class SaveSettingsTests(unittest.TestCase):
         self.assertTrue(app.save_settings(restart_running=False))
 
         self.assertTrue(app.config.allow_without_api_key)
-        self.assertEqual(app.config.host, "127.0.0.1")
-        self.assertEqual(app.host_var.get(), "127.0.0.1")
+        self.assertEqual(app.config.host, "0.0.0.0")
+        self.assertEqual(app.host_var.get(), "0.0.0.0")
         self.assertEqual(app.config.api_key, original_key)
         save_config.assert_called_once()
         app.stop_server.assert_called_once()
         app.start_server.assert_called_once()
-        app.api_host_entry.configure.assert_called_with(state="disabled")
+        self.warning.assert_called_once()
+        self.assertIn("redes privadas, controladas y seguras", self.warning.call_args.args[1])
+        app.api_host_entry.configure.assert_called_with(state="normal")
         for button in app.local_network_buttons:
-            button.configure.assert_called_with(state="disabled")
+            button.configure.assert_called_with(state="normal")
 
     @patch("moviu_server.app.messagebox.showerror")
     @patch("moviu_server.app.save_config")
@@ -88,18 +97,58 @@ class SaveSettingsTests(unittest.TestCase):
 
     @patch("moviu_server.app.messagebox.showinfo")
     @patch("moviu_server.app.save_config")
-    def test_active_bridge_is_rebound_when_no_key_mode_changes(self, _save, _info):
-        for enabled, host in ((True, "127.0.0.1"), (False, "0.0.0.0")):
-            with self.subTest(enabled=enabled):
+    def test_active_bridge_follows_scope_in_no_key_mode(self, _save, _info):
+        for host, previous_host in (("127.0.0.1", "0.0.0.0"), ("0.0.0.0", "127.0.0.1")):
+            with self.subTest(host=host):
                 app = make_app(server_running=False)
-                app.config.allow_without_api_key = not enabled
-                app.allow_without_api_key_var.set(enabled)
+                app.config.allow_without_api_key = True
+                app.config.host = previous_host
+                app.allow_without_api_key_var.set(True)
+                app.host_var.set(host)
                 app.bridge_controller.server = SimpleNamespace(printer_name="USB", port=9100)
 
                 self.assertTrue(app.save_settings())
 
                 app.stop_bridge.assert_called_once()
                 app.bridge_controller.start.assert_called_once_with("USB", 9100, host=host)
+
+    @patch("moviu_server.app.save_config")
+    def test_switching_to_local_keeps_no_key_and_restarts_active_listener(self, _save):
+        app = make_app(server_running=True)
+        app.config.allow_without_api_key = True
+        app.allow_without_api_key_var.set(True)
+        app.host_var.set("127.0.0.1")
+        app._change_connection_scope()
+        self.assertTrue(app.config.allow_without_api_key)
+        self.assertEqual(app.config.host, "127.0.0.1")
+        app.stop_server.assert_called_once()
+        app.start_server.assert_called_once()
+        self.warning.assert_not_called()
+
+    @patch("moviu_server.app.save_config")
+    def test_scope_failure_restores_radio_selection_without_saving(self, save):
+        app = make_app(server_running=True)
+        app.stop_server.return_value = False
+        app.host_var.set("127.0.0.1")
+        with patch("moviu_server.app.messagebox.showerror"):
+            app._change_connection_scope()
+        self.assertEqual(app.host_var.get(), "0.0.0.0")
+        save.assert_not_called()
+
+    @patch("moviu_server.app.save_config")
+    def test_no_key_warning_is_not_repeated_on_routine_saves(self, _save):
+        app = make_app(server_running=False)
+        app.allow_without_api_key_var.set(True)
+        app.save_settings(notify=False)
+        app.save_settings(notify=False)
+        self.warning.assert_called_once()
+
+    @patch("moviu_server.app.save_config")
+    def test_settings_preserve_startup_interface_choice(self, _save):
+        app = make_app(server_running=False)
+        app.default_interface_mode_var.set("advanced")
+        self.assertTrue(app.save_settings(notify=False))
+        self.assertEqual(app.config.default_interface_mode, "advanced")
 
     @patch("moviu_server.app.messagebox.showinfo")
     @patch("moviu_server.app.save_config")
@@ -196,18 +245,18 @@ class CertificateUrlTests(unittest.TestCase):
 
 
 class NetworkAccessSettingsTests(unittest.TestCase):
-    @patch("moviu_server.app.messagebox.showerror")
+    @patch("moviu_server.app.messagebox.showinfo")
+    @patch("moviu_server.app.messagebox.askyesno", return_value=True)
     @patch("moviu_server.app.open_local_network_ports")
-    def test_no_key_mode_prevents_opening_firewall(self, open_ports, showerror):
+    def test_no_key_lan_mode_can_open_firewall(self, open_ports, _ask, _info):
         app = make_app(server_running=False)
+        app.config.allow_without_api_key = True
         app.allow_without_api_key_var.set(True)
-        app.save_settings = MagicMock()
+        app.save_settings = MagicMock(return_value=True)
 
         app.enable_local_network_access()
 
-        open_ports.assert_not_called()
-        app.save_settings.assert_not_called()
-        showerror.assert_called_once()
+        open_ports.assert_called_once_with(9000, None, certificate_port=9001)
 
     @patch("moviu_server.app.messagebox.showinfo")
     @patch("moviu_server.app.messagebox.askyesno", return_value=True)

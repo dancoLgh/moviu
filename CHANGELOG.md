@@ -2,6 +2,22 @@
 
 Todos los cambios notables en este proyecto serán documentados en este archivo.
 
+## [1.7.0] - 2026-11-16
+
+### Añadido
+- Asistente inicial con plantillas de configuración para Odoo y ChePos y catálogo ampliable por la comunidad.
+- Activación automática del puente USB y del servidor, con selección de impresora y modo de acceso.
+- Modo fácil con estado del servidor, botón grande para iniciar o detener, IP copiable sola o con puerto y actividad reciente. Un botón abre la interfaz avanzada completa.
+- Vista inicial configurable por plantilla y desde Configuración. Las instalaciones anteriores conservan el modo avanzado.
+- Opción de impresión sin API key tanto desde este equipo como desde la red local, con una advertencia que recomienda redes privadas, controladas y seguras.
+
+### Mejorado
+- La API key y el alcance de conexión se eligen de forma independiente. La API HTTPS, el portal de certificados, el puente USB y mDNS respetan el alcance seleccionado.
+- Odoo ofrece uso local, compartido con clave o compartido sin clave. ChePos comienza en este equipo sin clave.
+- El inicio del servidor al abrir Moviu es independiente del inicio de la aplicación con Windows.
+- Guardado atómico de la configuración y recuperación al fallar el inicio del puente USB.
+- Documentación, guía de red local y página de descarga actualizadas.
+
 ## [1.6.0] - 2026-10-05
 
 ### Añadido

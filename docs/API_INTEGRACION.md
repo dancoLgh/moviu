@@ -3,12 +3,13 @@
 ## Resumen rápido
 
 - Servidor HTTPS local que expone una API REST para enviar trabajos de impresión.
-- Autenticación mediante `X-API-Key` en cabecera por defecto; opción sin clave limitada al mismo equipo desde v1.5.0.
+- Autenticación mediante `X-API-Key` en cabecera por defecto; opción sin clave para el mismo equipo o la red local desde v1.7.0.
 - Endpoints principales: `POST /api/print`, `GET /api/health`, `GET /api/printers`, `GET /api/discover`.
 - Soporta modos: `html`, `image`, `pdf`, `raw`, `raw_text`, `hybrid`, `zpl`.
 
 ## Requisitos
 
+- Para preparar el servidor y una PC cliente, sigue la [guía de impresión en red local](RED_LOCAL.md), con [capturas y pasos señalados en PDF](Moviu_Impresion_en_Red_Local.pdf).
 - Para conectar desde el equipo de Moviu, utiliza `https://127.0.0.1:9000`. Para conectar por LAN, utiliza la IP real de ese equipo y habilita el acceso de red con API key.
 - El servidor genera una CA local (`ca_cert.pem`) y firma con ella el certificado HTTPS del servidor; instala esa CA en tablets/clientes para confiar en la conexión.
 - En entornos de desarrollo puedes usar `-k` en `curl` o `verify=False` en `requests` si aún no instalas la CA.
@@ -20,11 +21,11 @@
 - El portal auxiliar `http://<host>:<puerto-api+1>/certificado` y su descarga de CA son públicos para permitir la instalación inicial. Nunca exponen claves privadas.
 - Si la API key es inválida la API devuelve `401 Unauthorized`.
 
-### Impresión sin API key desde el mismo equipo
+### Impresión sin API key
 
-Activa **Permitir impresión sin API key** en la página **Conexión** de Moviu. La opción se persiste como `allow_without_api_key: true` en `config.json` y fuerza la API HTTPS, el portal HTTP y el puente USB a escuchar en `127.0.0.1`. Los servicios activos se reinician al cambiar el modo y se deshabilita el acceso por LAN y el anuncio mDNS.
+Activa **Permitir impresión sin API key** en **Conexión**. Se persiste como `allow_without_api_key: true` y no cambia el alcance de conexión. **Solo este equipo** utiliza `host: "127.0.0.1"`; **Red local** utiliza `host: "0.0.0.0"`. La API HTTPS, el portal HTTP y el puente USB respetan ese host. Moviu advierte que se recomienda solo en redes privadas, controladas y seguras. Los servicios activos se reinician cuando cambia el modo de acceso.
 
-En este modo, `/api/print`, `/api/health` y `/api/printers` no requieren `X-API-Key`. El cliente debe ejecutarse en el equipo de Moviu y conectarse por loopback; una aplicación web puede hacerlo desde el navegador de ese equipo. Las conexiones de otros dispositivos no llegan al listener y la API rechaza con `403` cualquier cliente remoto que alcance los endpoints protegidos. Las cabeceras `X-Forwarded-For` no permiten eludir esta restricción.
+En este modo, `/api/print`, `/api/health` y `/api/printers` no requieren `X-API-Key`. Con **Solo este equipo**, el cliente debe conectarse por loopback y la API rechaza con `403` cualquier cliente remoto que alcance esos endpoints; las cabeceras de proxy no cambian esa comprobación. Con **Red local**, otros dispositivos pueden conectarse sin clave usando la IP real del equipo, por ejemplo `https://192.168.1.20:9000`, y el servidor se anuncia por mDNS. Habilita el firewall de la LAN si hace falta.
 
 ```bash
 curl -k -X POST "https://127.0.0.1:9000/api/print" \
@@ -104,19 +105,19 @@ CORS preflight o comprobación rápida.
 
 Enviar un trabajo de impresión.
 
-**Headers:** `Content-Type: application/json`. `X-API-Key` es obligatorio salvo en el modo local sin clave.
+**Headers:** `Content-Type: application/json`. `X-API-Key` es obligatorio salvo cuando está activada la impresión sin clave.
 
 **Respuestas:**
 - `200` con `PrintResponse`
 - `400` si el trabajo no es procesable
 - `401` si la API key falta o es inválida en el modo con clave
-- `403` si un cliente remoto alcanza este endpoint en el modo sin clave
+- `403` si un cliente remoto alcanza este endpoint en el modo **Solo este equipo** sin clave
 
 ### GET /api/health
 
 Verificar estado del servidor.
 
-**Headers:** `X-API-Key`, salvo en el modo local sin clave.
+**Headers:** `X-API-Key`, salvo cuando está activada la impresión sin clave.
 
 **Respuesta:** `200 { "status": "ok" }`
 
@@ -124,7 +125,7 @@ Verificar estado del servidor.
 
 Listar impresoras instaladas en el sistema.
 
-**Headers:** `X-API-Key`, salvo en el modo local sin clave.
+**Headers:** `X-API-Key`, salvo cuando está activada la impresión sin clave.
 
 **Respuesta:**
 ```json
@@ -138,7 +139,7 @@ Listar impresoras instaladas en el sistema.
 
 Descubrir servidores Moviu en la red local (mDNS). **No requiere autenticación.**
 
-En el modo sin clave, este endpoint solo es accesible desde el equipo de Moviu y puede buscar otros servidores de la LAN. El propio servidor sin clave no se anuncia por mDNS.
+El descubrimiento por mDNS está disponible cuando el alcance es **Red local**, tanto con clave como sin ella. En **Solo este equipo**, Moviu no se anuncia en la LAN, aunque puede buscar otros servidores.
 
 **Query params:** `timeout` (float, default: 3.0)
 
@@ -406,7 +407,7 @@ fetch(url, {
 
 ## Ejemplos sin API key
 
-Activa **Permitir impresión sin API key** antes de usar estos ejemplos. Ejecútalos desde el equipo donde está instalado Moviu. Usan `simulate: true` para comprobar la integración sin enviar papel; omítelo o cámbialo a `false` para imprimir.
+Activa **Permitir impresión sin API key** antes de usar estos ejemplos. Con **Solo este equipo**, ejecútalos desde el equipo de Moviu. Con **Red local**, reemplaza `127.0.0.1` por la IP real de Moviu y ejecútalos desde cualquier dispositivo de esa LAN. Usan `simulate: true` para comprobar la integración sin enviar papel; omítelo o cámbialo a `false` para imprimir.
 
 ### cURL con la CA local
 
@@ -465,7 +466,7 @@ La página web puede estar alojada fuera del equipo de Moviu, pero debe abrirse 
 
 Recibe bytes crudos por TCP y los envía a una impresora USB local.
 
-El puente integrado en Moviu sigue disponible cuando está activo el modo sin API key y escucha únicamente en `127.0.0.1`. Activa **Habilitar puente**, selecciona la impresora USB y pulsa **Iniciar**. Su puerto sigue siendo el configurado en **Puente USB** (por defecto `9100`). El protocolo TCP crudo no utiliza cabeceras HTTP ni `X-API-Key`.
+El puente integrado sigue disponible sin API key. Escucha en `127.0.0.1` con **Solo este equipo**, o en `0.0.0.0` con **Red local**. Activa **Habilitar puente**, selecciona la impresora USB y pulsa **Iniciar**. Su puerto sigue siendo el configurado en **Puente USB** (por defecto `9100`). El protocolo TCP crudo no utiliza cabeceras HTTP ni `X-API-Key`.
 
 Para enviar un trabajo de la API sin clave explícitamente a ese puente, incluye el destino TCP local:
 

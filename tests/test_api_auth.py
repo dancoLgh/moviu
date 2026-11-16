@@ -29,7 +29,7 @@ class ApiAuthenticationTests(unittest.TestCase):
                 self.processor.process.reset_mock()
 
     def test_local_mode_accepts_prints_without_key_from_loopback(self):
-        app = create_api(AppConfig(allow_without_api_key=True))
+        app = create_api(AppConfig(host="127.0.0.1", allow_without_api_key=True))
         for peer in ("127.0.0.1", "::1"):
             with self.subTest(peer=peer), TestClient(app, client=(peer, 12345)) as client:
                 response = client.post("/api/print", json=self.payload)
@@ -38,7 +38,7 @@ class ApiAuthenticationTests(unittest.TestCase):
                 self.assertEqual(client.get("/api/health").status_code, 200)
 
     def test_local_mode_rejects_remote_peer_even_with_key_and_forwarded_headers(self):
-        app = create_api(AppConfig(api_key="secret", allow_without_api_key=True))
+        app = create_api(AppConfig(host="127.0.0.1", api_key="secret", allow_without_api_key=True))
         for peer in ("192.168.1.25", "::ffff:192.168.1.25", "testclient"):
             with self.subTest(peer=peer), TestClient(app, client=(peer, 12345)) as client:
                 for headers in ({}, {
@@ -50,6 +50,22 @@ class ApiAuthenticationTests(unittest.TestCase):
                     self.assertEqual(client.get("/api/health", headers=headers).status_code, 403)
                     self.assertEqual(client.get("/api/printers", headers=headers).status_code, 403)
         self.processor.process.assert_not_called()
+
+    def test_lan_without_key_accepts_print_health_and_printers_from_other_devices(self):
+        app = create_api(AppConfig(host="0.0.0.0", allow_without_api_key=True))
+        with patch("moviu_server.server.discover_printers", return_value=["USB"]):
+            for peer in ("127.0.0.1", "192.168.1.25", "10.0.0.12"):
+                with self.subTest(peer=peer), TestClient(app, client=(peer, 12345)) as client:
+                    self.assertEqual(client.post("/api/print", json=self.payload).status_code, 200)
+                    self.assertEqual(client.get("/api/health").status_code, 200)
+                    self.assertEqual(client.get("/api/printers").status_code, 200)
+
+    def test_scope_changes_do_not_expand_an_existing_local_listener(self):
+        config = AppConfig(host="127.0.0.1", allow_without_api_key=True)
+        app = create_api(config)
+        config.host = "0.0.0.0"
+        with TestClient(app, client=("192.168.1.25", 12345)) as client:
+            self.assertEqual(client.post("/api/print", json=self.payload).status_code, 403)
 
     def test_mode_changes_do_not_remove_authentication_from_existing_listener(self):
         config = AppConfig(api_key="secret")

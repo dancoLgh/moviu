@@ -21,8 +21,10 @@ Frente a alternativas como QZ Tray o JSPrintManager, Moviu propone una ruta enfo
 ## Que ofrece
 
 - Aplicacion de escritorio para configurar y supervisar el servidor.
+- Asistente inicial con plantillas de configuración para Odoo y ChePos, ampliables por la comunidad.
 - API REST local protegida mediante `X-API-Key`.
-- Opción de impresión sin API key, limitada al equipo donde está instalado Moviu.
+- Impresión con o sin API key, tanto desde este equipo como desde la red local.
+- Modo fácil con estado, botón grande para iniciar o detener, IP copiable y actividad reciente.
 - HTTPS con generacion, exportacion e instalacion guiada de una CA local.
 - Impresoras de red por TCP e impresoras instaladas en Windows.
 - Puente TCP a USB integrado para impresoras locales.
@@ -43,8 +45,8 @@ Consulta la [guia de instalacion](docs/INSTALLATION.md) para el primer inicio, c
 
 ## Tres pasos
 
-1. Instala Moviu y configura tu impresora local o de red.
-2. Elige en **Conexión** si usarás API key o impresión sin clave desde el mismo equipo. Inicia el servidor y copia la URL HTTPS; copia también la clave si el modo la requiere.
+1. Instala Moviu y sigue el asistente: elige Odoo o ChePos y selecciona tu impresora. Para impresoras de red puedes elegir **Configuración manual**.
+2. Elige en **Conexión** si usarás API key o impresión sin clave, y si aceptarás trabajos solo desde este equipo o desde la red local. Inicia el servidor y copia la URL HTTPS; copia también la clave si el modo la requiere.
 3. Envia el trabajo desde tu aplicacion.
 
 ```bash
@@ -60,11 +62,17 @@ curl -k -X POST "https://127.0.0.1:9000/api/print" \
 
 En desarrollo puedes agregar `"simulate": true` para generar una vista previa sin enviar el trabajo a una impresora fisica.
 
-Para imprimir sin clave, activa **Permitir impresión sin API key** en **Conexión**. El cambio se guarda y reinicia los servicios activos automáticamente: la API, el portal de certificados y el puente USB quedan limitados a `127.0.0.1`, se deshabilitan los controles para habilitar la LAN y Moviu deja de anunciarse por mDNS. Envía las solicitudes desde ese equipo a `https://127.0.0.1:9000`, omitiendo `X-API-Key`. HTTPS sigue requiriendo confiar en la CA local. La impresora de destino puede seguir siendo local o de red.
+En el primer inicio, la plantilla **Odoo** activa el puente USB y permite elegir entre **Solo en este equipo** (`127.0.0.1`, sin API key) y **Compartir en la red local** (`0.0.0.0`, con o sin API key y acceso por firewall). **ChePos** solo pide la impresora y usa siempre este equipo, sin clave ni uso compartido. Al pulsar **Finalizar**, Moviu guarda todo e inicia el puente y el servidor; ambos volverán a iniciarse al abrir la aplicación. Puedes repetir el asistente en **Configuración → Usar plantilla de configuración**. Las instalaciones existentes conservan sus ajustes. Consulta las [plantillas y cómo añadir otra](docs/CONFIGURATION_TEMPLATES.md).
+
+Para imprimir sin clave, activa **Permitir impresión sin API key** en **Conexión**. Elige independientemente **Solo este equipo** (`127.0.0.1`) o **Red local** (`0.0.0.0`); cambiar la autenticación conserva ese alcance. Moviu muestra una advertencia al activar la impresión sin clave: se recomienda solo en redes privadas, controladas y seguras. Los clientes omiten `X-API-Key` y siguen necesitando confiar en la CA de HTTPS. El puente USB y el portal de certificados respetan el alcance elegido.
 
 Al desactivar esta opción, vuelve a exigirse la API key existente. Para recibir trabajos desde otros dispositivos, configura **Host API** como `0.0.0.0`, guarda los cambios y habilita el acceso en la red local.
 
-Consulta la [configuración paso a paso](docs/INSTALLATION.md#imprimir-sin-api-key-desde-este-equipo) y los [ejemplos sin clave para cURL, Python y JavaScript](docs/API_INTEGRACION.md#ejemplos-sin-api-key). En aplicaciones web, el navegador que envía la impresión debe estar en el equipo de Moviu aunque la página esté alojada en otro servidor.
+Consulta la [configuración paso a paso](docs/INSTALLATION.md#imprimir-sin-api-key-desde-este-equipo) y los [ejemplos sin clave para cURL, Python y JavaScript](docs/API_INTEGRACION.md#ejemplos-sin-api-key). En modo **Solo este equipo**, el navegador que envía la impresión debe estar en el equipo de Moviu; en **Red local** también puede estar en otro dispositivo de la LAN.
+
+## Modo fácil y avanzado
+
+El modo fácil muestra el estado del servidor, un botón grande para iniciar o detener, la IP de Moviu con botones **Copiar IP** y **Copiar IP con puerto**, y la actividad reciente. El botón **Modo avanzado** abre la interfaz completa; **Modo fácil** permite volver. En **Configuración → Al abrir Moviu** puedes elegir la vista inicial. Las plantillas Odoo y ChePos abren el modo fácil; cada plantilla puede definir otro valor. Las instalaciones anteriores conservan el modo avanzado al actualizar.
 
 ## Modos de impresion
 
@@ -93,14 +101,14 @@ flowchart LR
 
 Moviu se ejecuta en la misma red que las impresoras. La aplicacion web envia trabajos a la API local y Moviu se ocupa de renderizar, adaptar y enrutar el contenido.
 
-La API exige clave por defecto. En el modo sin clave, solo acepta solicitudes desde el mismo equipo por loopback; la impresora de destino puede seguir estando en la red.
+La autenticación y el alcance son independientes: puedes exigir API key o desactivarla tanto para uso en este equipo como para la red local. Las plantillas locales comienzan sin clave. La impresora de destino puede ser local o de red.
 
 ## Seguridad y certificados
 
 - Cada instalacion genera una API key local que puede regenerarse.
 - La comunicacion usa HTTPS con una CA creada por Moviu.
 - La interfaz permite exportar esa CA para instalarla en los dispositivos cliente.
-- El portal público usa HTTP en `http://<host>:<puerto-HTTPS + 1>/certificado`. En modo LAN, con la API en `https://192.168.1.20:9000`, la guía queda en `http://192.168.1.20:9001/certificado`; en modo sin clave, se abre desde el mismo equipo en `http://127.0.0.1:9001/certificado`.
+- El portal público usa HTTP en `http://<host>:<puerto-HTTPS + 1>/certificado`. En modo LAN, con la API en `https://192.168.1.20:9000`, la guía queda en `http://192.168.1.20:9001/certificado`; en modo **Solo este equipo**, se abre desde el mismo equipo en `http://127.0.0.1:9001/certificado`.
 - El listener HTTP solo expone la guia y la descarga de la CA; la API de impresion permanece exclusivamente en HTTPS.
 - Los certificados y la configuracion permanecen en `~/.moviu_printer/`.
 - El servicio esta pensado para redes locales confiables, no para exposicion directa a Internet.
@@ -138,8 +146,8 @@ python -m unittest discover -s tests
 Las releases se generan automaticamente al subir una etiqueta `v*`. Antes de crearla, actualiza `VERSION` en `moviu_server/config.py` y confirma que coincida con la etiqueta:
 
 ```bash
-git tag v1.6.0
-git push origin v1.6.0
+git tag v1.7.0
+git push origin v1.7.0
 ```
 
 GitHub Actions ejecuta las pruebas, compila Windows y Linux, genera las notas de la release y publica ambos binarios. Si alguna prueba o compilacion falla, la release no se crea.
@@ -147,6 +155,7 @@ GitHub Actions ejecuta las pruebas, compila Windows y Linux, genera las notas de
 ## Documentacion
 
 - [Instalacion y distribucion](docs/INSTALLATION.md)
+- [Imprimir desde otro equipo de la red local](docs/RED_LOCAL.md) · [Guía ilustrada en PDF](docs/Moviu_Impresion_en_Red_Local.pdf)
 - [Integracion completa de la API](docs/API_INTEGRACION.md)
 - [Descubrimiento mDNS/DNS-SD](docs/DISCOVERY.md)
 - [Puente TCP a USB](tcp_usb_bridge/README.md)

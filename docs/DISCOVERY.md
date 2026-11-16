@@ -4,11 +4,11 @@ Cuando la API está configurada para recibir conexiones por LAN, Moviu se anunci
 
 ## Modo local sin API key
 
-Con **Conexión → Permitir impresión sin API key** activo, Moviu escucha únicamente en `127.0.0.1` y no publica anuncios mDNS. Por eso no aparece en `discover.py` ni en las búsquedas de otros dispositivos de la LAN. Desde el equipo donde está instalado, utiliza directamente `https://127.0.0.1:9000`; cambia el puerto si configuraste otro.
+Con **Conexión → Solo este equipo**, Moviu escucha en `127.0.0.1` y no publica anuncios mDNS, tanto con API key como sin ella. Por eso no aparece en `discover.py` ni en las búsquedas de otros dispositivos de la LAN. Desde el equipo donde está instalado, utiliza directamente `https://127.0.0.1:9000`; cambia el puerto si configuraste otro.
 
 `GET /api/discover` sigue disponible desde ese equipo para buscar otros servidores que sí se anuncian en la LAN. El endpoint no publica ni habilita el acceso al propio servidor local.
 
-Para volver a anunciar Moviu en la LAN, desactiva la opción sin clave, configura **Host API** como `0.0.0.0`, guarda e inicia el servidor si está detenido. Los clientes descubiertos deberán utilizar la API key. Consulta la [guía de configuración de acceso](INSTALLATION.md#volver-a-recibir-trabajos-desde-la-lan).
+Para anunciar Moviu en la LAN, elige **Red local** o configura **Host API** como `0.0.0.0`, guarda e inicia el servidor si está detenido. El anuncio funciona con API key o sin ella. Los clientes solo enviarán la clave si no está activada **Permitir impresión sin API key**. El modo sin clave se recomienda solo en redes privadas, controladas y seguras. Consulta la [guía de configuración de acceso](INSTALLATION.md#volver-a-recibir-trabajos-desde-la-lan).
 
 ## Endpoint HTTP
 

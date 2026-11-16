@@ -33,6 +33,8 @@ from .certs import (
     install_certificate_in_system,
 )
 from .config import AppConfig, CONFIG_DIR, load_config, save_config, VERSION
+from .configuration_templates import build_template_config
+from .setup_wizard import SetupWizard
 from .server import certificate_http_port, create_api, create_certificate_api
 from .usb_bridge import UsbBridgeController, discover_printers
 from .mdns import MoviuServiceAnnouncer, get_local_ip, get_local_ips
@@ -47,6 +49,8 @@ from .resources import APP_ICON_ICO_PATH, load_app_icon
 from .ui_state import (
     ActivityFeed,
     NAV_ITEMS,
+    NO_API_KEY_WARNING,
+    moviu_connection_addresses,
     certificate_portal_url,
     printer_route_label,
     tooltip_coordinates,
@@ -293,6 +297,7 @@ class DesktopApp:
         self._update_install_lock = threading.Lock()
         self._update_thread: threading.Thread | None = None
         self._server_start_token: object | None = None
+        self._setup_wizard: SetupWizard | None = None
         _ensure_streams()
         self._setup_logging()
         self._set_window_icon()
@@ -306,9 +311,12 @@ class DesktopApp:
             on_exit=lambda: self._queue_ui_callback(self._do_exit),
         )
         self._check_single_instance()
-        self._apply_autostart(self.config.auto_start, notify=False)
-        self._maybe_autostart_server()
-        self._maybe_autostart_bridge()
+        if self.config.setup_completed:
+            self._apply_autostart(self.config.auto_start, notify=False)
+            self._maybe_autostart_server()
+            self._maybe_autostart_bridge()
+        else:
+            self.root.after_idle(self.open_setup_wizard)
         acknowledge_update_startup()
 
     def _set_window_icon(self) -> None:
@@ -378,6 +386,8 @@ class DesktopApp:
         self.api_key_var = tk.StringVar(value=self.config.api_key)
         self.simulate_var = tk.BooleanVar(value=self.config.simulate_printer)
         self.auto_start_var = tk.BooleanVar(value=self.config.auto_start)
+        self.server_autostart_var = tk.BooleanVar(value=self.config.server_autostart)
+        self.default_interface_mode_var = tk.StringVar(value=self.config.default_interface_mode)
 
         self.bridge_enabled_var = tk.BooleanVar(value=self.config.usb_bridge_enabled)
         self.bridge_port_var = tk.StringVar(value=str(self.config.usb_bridge_port))
@@ -482,6 +492,9 @@ class DesktopApp:
             command=self._toggle_advanced_panel,
         )
         self.advanced_toggle_btn.grid(row=0, column=2, sticky="e")
+        ttk.Button(
+            topbar, text="Modo fácil", command=lambda: self._show_interface_mode("simple")
+        ).grid(row=0, column=3, sticky="e", padx=(8, 0))
 
         page_host = ttk.Frame(center, style="Page.TFrame", padding=18)
         page_host.grid(row=1, column=0, sticky="nsew")
@@ -512,11 +525,123 @@ class DesktopApp:
         self.advanced_panel_visible = True
 
         self._show_page("home")
+        self._build_simple_view()
+        self._show_interface_mode(self.config.default_interface_mode)
 
         self.refresh_printers(initial=True)
         self._refresh_activity_summary()
         self._poll_background_events()
         self.root.after(3000, self._background_update_check)
+
+    def _build_simple_view(self) -> None:
+        self.simple_shell = ttk.Frame(self.root, style="App.TFrame", padding=20)
+        self.simple_shell.columnconfigure(0, weight=1)
+        self.simple_shell.rowconfigure(3, weight=1)
+        header = ttk.Frame(self.simple_shell, style="App.TFrame")
+        header.grid(row=0, column=0, sticky="ew", pady=(0, 14))
+        ttk.Label(header, text="moviu", style="Brand.TLabel").pack(side=tk.LEFT)
+        ttk.Button(
+            header, text="Modo avanzado", command=lambda: self._show_interface_mode("advanced")
+        ).pack(side=tk.RIGHT)
+
+        server = self._card(self.simple_shell, padding=(20, 18))
+        server.grid(row=1, column=0, sticky="ew", pady=(0, 14))
+        ttk.Label(server, text="Estado del servidor", style="CardTitle.TLabel").pack(anchor="w")
+        ttk.Label(
+            server, textvariable=self.status_title_var, style="HeroTitle.TLabel", wraplength=650
+        ).pack(anchor="w", pady=(10, 18))
+        self.simple_action_var = tk.StringVar(value="Iniciar servidor")
+        self.simple_action_btn = ttk.Button(
+            server, textvariable=self.simple_action_var, style="SimpleStart.TButton",
+            command=self._toggle_simple_server,
+        )
+        self.simple_action_btn.pack(fill=tk.X)
+        self.server_badge_var.trace_add("write", lambda *_args: self._sync_simple_server_state())
+
+        connection = self._card(self.simple_shell, padding=(20, 14))
+        connection.grid(row=2, column=0, sticky="ew", pady=(0, 14))
+        connection.columnconfigure(0, weight=1)
+        self.simple_ip_var = tk.StringVar()
+        self.simple_ip_port_var = tk.StringVar()
+        ttk.Label(connection, text="IP de Moviu", style="CardTitle.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(connection, textvariable=self.simple_ip_var, style="Metric.TLabel").grid(
+            row=1, column=0, sticky="w", pady=(6, 4)
+        )
+        ttk.Label(connection, textvariable=self.simple_ip_port_var, style="Muted.TLabel").grid(
+            row=2, column=0, sticky="w"
+        )
+        copy_actions = ttk.Frame(connection, style="Surface.TFrame")
+        copy_actions.grid(row=1, column=1, rowspan=2, sticky="e", padx=(14, 0))
+        ttk.Button(copy_actions, text="Copiar IP", command=self._copy_moviu_ip).pack(side=tk.LEFT)
+        ttk.Button(
+            copy_actions, text="Copiar IP con puerto", command=lambda: self._copy_moviu_ip(include_port=True)
+        ).pack(side=tk.LEFT, padx=(8, 0))
+        self.simple_copy_status_var = tk.StringVar()
+        ttk.Label(connection, textvariable=self.simple_copy_status_var, style="Muted.TLabel").grid(
+            row=3, column=0, columnspan=2, sticky="w", pady=(6, 0)
+        )
+        self.full_url_var.trace_add("write", lambda *_args: self._refresh_simple_connection())
+
+        activity = self._card(self.simple_shell, padding=(20, 14))
+        activity.grid(row=3, column=0, sticky="nsew")
+        ttk.Label(activity, text="Actividad reciente", style="CardTitle.TLabel").pack(anchor="w", pady=(0, 12))
+        for message, timestamp in zip(self.activity_message_vars, self.activity_time_vars):
+            row = ttk.Frame(activity, style="ActivityRow.TFrame", padding=(12, 8))
+            row.pack(fill=tk.X, pady=2)
+            row.columnconfigure(0, weight=1)
+            ttk.Label(row, textvariable=message, style="Activity.TLabel", wraplength=570).grid(
+                row=0, column=0, sticky="w"
+            )
+            ttk.Label(row, textvariable=timestamp, style="Activity.TLabel").grid(
+                row=0, column=1, sticky="ne", padx=(12, 0)
+            )
+        self._refresh_simple_connection()
+        self._sync_simple_server_state()
+
+    def _show_interface_mode(self, mode: str) -> None:
+        if mode not in {"simple", "advanced"}:
+            raise ValueError("Modo de interfaz inválido")
+        for tooltip in self.help_tooltips:
+            tooltip.hide()
+        self._interface_mode = mode
+        if mode == "simple":
+            self.layout_shell.grid_remove()
+            self.simple_shell.grid(row=0, column=0, sticky="nsew")
+            self.root.minsize(780, 700)
+        else:
+            self.simple_shell.grid_remove()
+            self.layout_shell.grid()
+            self.root.minsize(1050, 680)
+
+    def _refresh_simple_connection(self) -> None:
+        host, port = self._active_api_endpoint()
+        address, endpoint = moviu_connection_addresses(host, port, get_local_ip())
+        self.simple_ip_var.set(address)
+        self.simple_ip_port_var.set(endpoint)
+
+    def _copy_moviu_ip(self, include_port: bool = False) -> None:
+        self._refresh_simple_connection()
+        value = self.simple_ip_port_var.get() if include_port else self.simple_ip_var.get()
+        self.root.clipboard_clear()
+        self.root.clipboard_append(value)
+        self.simple_copy_status_var.set("IP con puerto copiada" if include_port else "IP copiada")
+
+    def _sync_simple_server_state(self) -> None:
+        status = self.server_badge_var.get()
+        starting = status == "Iniciando"
+        running = status in {"Servidor activo", "Error al detener"}
+        self.simple_action_var.set("Iniciando…" if starting else "Detener servidor" if running else "Iniciar servidor")
+        self.simple_action_btn.configure(
+            state="disabled" if starting else "normal",
+            style="SimpleStop.TButton" if running else "SimpleStart.TButton",
+        )
+        self._refresh_simple_connection()
+
+    def _toggle_simple_server(self) -> None:
+        if self.controller.thread and self.controller.thread.is_alive():
+            self.stop_server()
+        else:
+            self.start_server()
 
     def _build_home_page(self, page: ttk.Frame) -> None:
         for column in (0, 1):
@@ -775,10 +900,18 @@ class DesktopApp:
         ).pack(anchor="w", pady=(14, 0))
         ttk.Label(
             api_card,
-            text="Solo este equipo. Al activarlo, se deshabilita el acceso desde la red local.",
+            text=NO_API_KEY_WARNING,
             style="Muted.TLabel",
             wraplength=300,
         ).pack(anchor="w", pady=(4, 0))
+        ttk.Label(api_card, text="¿Desde dónde se puede imprimir?", style="FieldLabel.TLabel").pack(
+            anchor="w", pady=(14, 6)
+        )
+        for label, host in (("Solo este equipo", "127.0.0.1"), ("Red local", "0.0.0.0")):
+            ttk.Radiobutton(
+                api_card, text=label, variable=self.host_var, value=host,
+                style="Wizard.TRadiobutton", command=self._change_connection_scope,
+            ).pack(anchor="w", pady=3)
 
         cert_card = self._card(page)
         cert_card.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
@@ -879,6 +1012,22 @@ class DesktopApp:
             text="Ejecutar Moviu al iniciar Windows",
             variable=self.auto_start_var,
         ).pack(anchor="w", pady=8)
+        ttk.Checkbutton(
+            behavior,
+            text="Iniciar servidor al abrir Moviu",
+            variable=self.server_autostart_var,
+        ).pack(anchor="w", pady=8)
+        ttk.Label(behavior, text="Al abrir Moviu", style="FieldLabel.TLabel").pack(anchor="w", pady=(14, 4))
+        for label, value in (("Modo fácil", "simple"), ("Modo avanzado", "advanced")):
+            ttk.Radiobutton(
+                behavior, text=label, value=value, variable=self.default_interface_mode_var,
+                style="Wizard.TRadiobutton",
+            ).pack(anchor="w", pady=3)
+        ttk.Button(
+            behavior,
+            text="Usar plantilla de configuración",
+            command=self.open_setup_wizard,
+        ).pack(fill=tk.X, pady=(16, 8))
 
         updates = self._card(page)
         updates.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
@@ -1443,12 +1592,134 @@ class DesktopApp:
         card.columnconfigure(0, weight=1)
         return card
 
+    def open_setup_wizard(self) -> None:
+        if self._setup_wizard is not None and self._setup_wizard.winfo_exists():
+            self._setup_wizard.lift()
+            return
+        self._setup_wizard = SetupWizard(
+            self.root,
+            self.config,
+            self.apply_configuration_template,
+            on_cancel=self._do_exit if not self.config.setup_completed else None,
+            on_manual=self.complete_manual_setup if not self.config.setup_completed else None,
+        )
+
+    def complete_manual_setup(self) -> bool:
+        """Allow network-printer users to continue with the existing settings UI."""
+        self.config.setup_completed = True
+        try:
+            save_config(self.config)
+        except OSError as exc:
+            self.config.setup_completed = False
+            messagebox.showerror("Configuración", f"No se pudo guardar la configuración: {exc}", parent=self.root)
+            return False
+        self._show_interface_mode("advanced")
+        self._show_page("printers")
+        return True
+
+    def apply_configuration_template(
+        self, template_id: str, printer_name: str, access_mode: str
+    ) -> bool:
+        """Apply the wizard's choices after preparing the requested USB listener."""
+        try:
+            candidate = build_template_config(self.config, template_id, printer_name, access_mode)
+            if printer_name not in discover_printers():
+                raise ValueError("La impresora ya no está disponible. Vuelve a seleccionarla.")
+        except Exception as exc:
+            messagebox.showerror("Configuración", str(exc), parent=self.root)
+            return False
+
+        server_was_running = bool(self.controller.thread and self.controller.thread.is_alive())
+        previous_bridge = self.bridge_controller.server
+        warn_without_key = candidate.allow_without_api_key and (
+            not self.config.allow_without_api_key
+            or (not is_local_network_bind(self.config.bind_host) and is_local_network_bind(candidate.bind_host))
+        )
+        if server_was_running and not self.stop_server():
+            messagebox.showerror(
+                "Configuración", "No se pudo detener el servidor para aplicar la plantilla.", parent=self.root
+            )
+            return False
+        self.stop_bridge()
+        try:
+            self.bridge_controller.start(
+                printer_name, candidate.usb_bridge_port,
+                host=candidate.bind_host,
+            )
+            save_config(candidate)
+        except Exception as exc:
+            logging.exception("No se pudo aplicar la plantilla de configuración")
+            self.stop_bridge()
+            try:
+                if previous_bridge is not None:
+                    self.bridge_controller.start(
+                        previous_bridge.printer_name, previous_bridge.port, host=previous_bridge.host
+                    )
+                if server_was_running:
+                    self.start_server(save=False)
+            except Exception:
+                logging.exception("No se pudieron restaurar los servicios anteriores")
+            messagebox.showerror("Configuración", f"No se pudo aplicar la plantilla: {exc}", parent=self.root)
+            return False
+
+        self.config = candidate
+        self.controller.config = candidate
+        for variable, value in (
+            (self.host_var, candidate.host),
+            (self.port_var, str(candidate.port)),
+            (self.allow_without_api_key_var, candidate.allow_without_api_key),
+            (self.api_key_var, candidate.api_key),
+            (self.printer_host_var, candidate.printer_host),
+            (self.printer_port_var, str(candidate.printer_port)),
+            (self.printer_width_var, str(candidate.printer_width)),
+            (self.printer_gamma_var, candidate.printer_gamma),
+            (self.cut_margin_lines_var, str(candidate.cut_margin_lines)),
+            (self.simulate_var, candidate.simulate_printer),
+            (self.auto_start_var, candidate.auto_start),
+            (self.bridge_enabled_var, candidate.usb_bridge_enabled),
+            (self.bridge_port_var, str(candidate.usb_bridge_port)),
+            (self.bridge_printer_var, candidate.usb_bridge_printer),
+            (self.bridge_autostart_var, candidate.usb_bridge_autostart),
+            (self.server_autostart_var, candidate.server_autostart),
+            (self.github_token_var, candidate.github_token),
+            (self.default_interface_mode_var, candidate.default_interface_mode),
+        ):
+            variable.set(value)
+        self._update_access_controls()
+        self._update_endpoint_url()
+        self._show_interface_mode(candidate.default_interface_mode)
+        self.start_server(save=False)
+        if warn_without_key:
+            self._warn_without_api_key()
+        if is_local_network_bind(candidate.bind_host):
+            try:
+                open_local_network_ports(
+                    candidate.port, candidate.usb_bridge_port,
+                    certificate_port=certificate_http_port(candidate.port),
+                )
+            except (NetworkAccessError, OSError) as exc:
+                logging.exception("La plantilla se aplicó, pero falta habilitar el firewall")
+                messagebox.showwarning(
+                    "Acceso en red pendiente",
+                    "La configuración está guardada. No se pudo habilitar el firewall:\n"
+                    f"{exc}\nPuedes reintentarlo desde Conexión → Habilitar acceso en la red local.",
+                    parent=self.root,
+                )
+        logging.info("Plantilla %s aplicada (%s)", template_id, access_mode)
+        return True
+
     def save_settings(self, notify: bool = True, restart_running: bool = True) -> bool:
         server_was_running = bool(self.controller.thread and self.controller.thread.is_alive())
         try:
             allow_without_api_key = self.allow_without_api_key_var.get()
             mode_changed = allow_without_api_key != self.config.allow_without_api_key
-            host = "127.0.0.1" if allow_without_api_key else self.host_var.get()
+            host = self.host_var.get().strip()
+            scope_changed = host != self.config.host
+            listener_changed = mode_changed or scope_changed
+            warn_without_key = allow_without_api_key and (
+                mode_changed
+                or (not is_local_network_bind(self.config.bind_host) and is_local_network_bind(host))
+            )
             port = int(self.port_var.get())
             portal_port = certificate_http_port(port)
             printer_host = self.printer_host_var.get()
@@ -1469,6 +1740,10 @@ class DesktopApp:
                 raise ValueError("El margen antes del corte debe estar entre 0 y 20 líneas")
             simulate_printer = self.simulate_var.get()
             auto_start = self.auto_start_var.get()
+            server_autostart = self.server_autostart_var.get()
+            default_interface_mode = self.default_interface_mode_var.get()
+            if default_interface_mode not in {"simple", "advanced"}:
+                raise ValueError("Selecciona un modo de interfaz válido")
             usb_bridge_enabled = self.bridge_enabled_var.get()
             usb_bridge_port = int(self.bridge_port_var.get())
             instance_port = getattr(self, "instance_port", 29170)
@@ -1484,8 +1759,8 @@ class DesktopApp:
             github_token = self.github_token_var.get()
 
             # Stop old listeners before changing authentication or network scope.
-            running_bridge = self.bridge_controller.server if mode_changed else None
-            if mode_changed and server_was_running:
+            running_bridge = self.bridge_controller.server if scope_changed else None
+            if listener_changed and server_was_running:
                 if not self.stop_server():
                     messagebox.showerror(
                         "Configuración",
@@ -1505,6 +1780,8 @@ class DesktopApp:
             self.config.cut_margin_lines = cut_margin_lines
             self.config.simulate_printer = simulate_printer
             self.config.auto_start = auto_start
+            self.config.server_autostart = server_autostart
+            self.config.default_interface_mode = default_interface_mode
             self.config.usb_bridge_enabled = usb_bridge_enabled
             self.config.usb_bridge_port = usb_bridge_port
             self.config.usb_bridge_printer = usb_bridge_printer
@@ -1517,10 +1794,10 @@ class DesktopApp:
                 self.bridge_controller.start(
                     running_bridge.printer_name,
                     running_bridge.port,
-                    host="127.0.0.1" if allow_without_api_key else "0.0.0.0",
+                    host=self.config.bind_host,
                 )
-            if (restart_running or mode_changed) and server_was_running:
-                if not mode_changed and not self.stop_server():
+            if (restart_running or listener_changed) and server_was_running:
+                if not listener_changed and not self.stop_server():
                     messagebox.showerror(
                         "Configuración",
                         "La configuración se guardó, pero el servidor anterior no pudo detenerse. "
@@ -1530,6 +1807,8 @@ class DesktopApp:
                 self.start_server()
             else:
                 self._update_endpoint_url()
+            if warn_without_key:
+                self._warn_without_api_key()
             if notify:
                 detail = (
                     "Configuración guardada. El servidor se está reiniciando."
@@ -1548,15 +1827,19 @@ class DesktopApp:
             return False
 
     def _update_access_controls(self) -> None:
-        local_only = self.allow_without_api_key_var.get()
-        if local_only:
-            self.host_var.set("127.0.0.1")
-        self.api_host_entry.configure(state="disabled" if local_only else "normal")
+        self.api_host_entry.configure(state="normal")
         for button in self.local_network_buttons:
-            button.configure(state="disabled" if local_only else "normal")
+            button.configure(state="normal")
+
+    def _warn_without_api_key(self) -> None:
+        messagebox.showwarning("Impresión sin API key", NO_API_KEY_WARNING)
+
+    def _change_connection_scope(self) -> None:
+        if not self.save_settings(notify=False, restart_running=False):
+            self.host_var.set(self.config.host)
 
     def _change_api_key_mode(self) -> None:
-        if not self.save_settings():
+        if not self.save_settings(notify=False, restart_running=False):
             self.allow_without_api_key_var.set(self.config.allow_without_api_key)
             self._update_access_controls()
 
@@ -1570,7 +1853,11 @@ class DesktopApp:
         logging.info("Se regeneró la API key")
 
     def refresh_printers(self, initial: bool = False) -> None:
-        self.available_printers = discover_printers()
+        try:
+            self.available_printers = discover_printers()
+        except Exception:
+            logging.exception("No se pudieron listar las impresoras instaladas")
+            self.available_printers = []
         self.printer_combo["values"] = self.available_printers
 
         if not self.bridge_printer_var.get() and self.available_printers:
@@ -1581,7 +1868,8 @@ class DesktopApp:
                 "Impresoras",
                 "No se encontraron impresoras USB. Este listado solo está disponible en Windows.",
             )
-        self.save_settings(notify=False, restart_running=False)
+        if not initial:
+            self.save_settings(notify=False, restart_running=False)
 
     def start_bridge(self) -> None:
         if not self.bridge_enabled_var.get():
@@ -1605,7 +1893,7 @@ class DesktopApp:
             return
 
         try:
-            host = "127.0.0.1" if self.config.allow_without_api_key else "0.0.0.0"
+            host = self.config.bind_host
             self.bridge_controller.start(printer, port, host=host)
             self._update_bridge_status(f"Escuchando en {host}:{port} → {printer}")
             self.save_settings(notify=False, restart_running=False)
@@ -1627,11 +1915,11 @@ class DesktopApp:
             self.root.after(200, self.start_bridge)
 
     def _maybe_autostart_server(self) -> None:
-        if self.config.auto_start:
+        if self.config.server_autostart or self.config.auto_start:
             self.root.after(200, self.start_server)
 
-    def start_server(self) -> None:
-        if not self.save_settings(notify=False, restart_running=False):
+    def start_server(self, *, save: bool = True) -> None:
+        if save and not self.save_settings(notify=False, restart_running=False):
             return
         try:
             self.controller.start()
@@ -1886,12 +2174,6 @@ class DesktopApp:
         webbrowser.open(portal_url)
 
     def enable_local_network_access(self) -> None:
-        if self.allow_without_api_key_var.get():
-            messagebox.showerror(
-                "Acceso en red local",
-                "Desactiva la impresión sin API key antes de habilitar el acceso en red local.",
-            )
-            return
         running_bridge = self.bridge_controller.server
         running_bridge_port = int(running_bridge.port) if running_bridge else None
         if not self.save_settings(notify=False):
@@ -2118,6 +2400,11 @@ class DesktopApp:
         style.map("TCombobox", fieldbackground=[("readonly", "#0a1727")], foreground=[("readonly", "#dce7f5")])
         style.configure("TCheckbutton", background=surface, foreground="#c4d0df", font=("Segoe UI", 9))
         style.map("TCheckbutton", background=[("active", surface)], foreground=[("active", text)])
+        style.configure("Wizard.TRadiobutton", background=surface, foreground=text, font=("Segoe UI Semibold", 11))
+        style.map("Wizard.TRadiobutton", background=[("active", surface)], foreground=[("active", text)])
+        for name, color in (("SimpleStart.TButton", blue), ("SimpleStop.TButton", "#ae3447")):
+            style.configure(name, background=color, foreground="#ffffff", font=("Segoe UI Semibold", 16), padding=(24, 16))
+            style.map(name, foreground=[("disabled", "#94a4b8")])
         style.configure("Horizontal.TScale", background=surface, troughcolor="#0a1727")
         style.configure(
             "Update.Horizontal.TProgressbar",

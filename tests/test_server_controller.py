@@ -14,26 +14,35 @@ class ServerControllerTests(unittest.TestCase):
     @patch("moviu_server.app.uvicorn.Config")
     @patch("moviu_server.app.uvicorn.Server")
     @patch("moviu_server.app.threading.Thread")
-    def test_no_key_mode_binds_both_listeners_to_loopback(
+    def test_no_key_mode_binds_both_listeners_to_selected_scope(
         self, _thread, _server, config_class, _certificate_api, _api, _certs
     ):
-        controller = ServerController(AppConfig(host="0.0.0.0", allow_without_api_key=True))
-
-        controller.start()
-
-        self.assertEqual(config_class.call_count, 2)
-        for configured in config_class.call_args_list:
-            self.assertEqual(configured.kwargs["host"], "127.0.0.1")
-        self.assertFalse(config_class.call_args_list[0].kwargs["proxy_headers"])
+        for host in ("127.0.0.1", "0.0.0.0"):
+            with self.subTest(host=host):
+                config_class.reset_mock()
+                controller = ServerController(AppConfig(host=host, allow_without_api_key=True))
+                controller.start()
+                self.assertEqual(config_class.call_count, 2)
+                for configured in config_class.call_args_list:
+                    self.assertEqual(configured.kwargs["host"], host)
+                self.assertFalse(config_class.call_args_list[0].kwargs["proxy_headers"])
 
     @patch("moviu_server.app.MoviuServiceAnnouncer")
     def test_no_key_mode_is_not_announced_on_lan(self, announcer):
-        controller = ServerController(AppConfig(allow_without_api_key=True))
+        controller = ServerController(AppConfig(host="127.0.0.1", allow_without_api_key=True))
         controller.server = SimpleNamespace(started=True)
 
         controller.announce_mdns()
 
         announcer.assert_not_called()
+
+    @patch("moviu_server.app.MoviuServiceAnnouncer")
+    def test_no_key_lan_mode_is_announced_on_lan(self, announcer):
+        controller = ServerController(AppConfig(host="0.0.0.0", allow_without_api_key=True))
+        controller.server = SimpleNamespace(started=True)
+        controller.announce_mdns()
+        announcer.assert_called_once()
+        announcer.return_value.start.assert_called_once()
 
     @patch("moviu_server.app._suppress_windows_connection_reset_noise")
     @patch("moviu_server.app._ensure_streams")

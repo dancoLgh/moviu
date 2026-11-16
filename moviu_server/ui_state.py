@@ -8,6 +8,12 @@ from datetime import datetime
 from threading import Lock
 
 
+NO_API_KEY_WARNING = (
+    "Sin API key, cualquier aplicación o equipo con acceso a Moviu puede imprimir. "
+    "Se recomienda usar esta opción solo en redes privadas, controladas y seguras."
+)
+
+
 NAV_ITEMS = (
     ("home", "Inicio"),
     ("printers", "Impresoras"),
@@ -16,6 +22,15 @@ NAV_ITEMS = (
     ("settings", "Configuración"),
     ("help", "Ayuda"),
 )
+
+
+def moviu_connection_addresses(host: str, port: int, local_ip: str) -> tuple[str, str]:
+    """Return a client address, without URL scheme, with and without a port."""
+    address = local_ip if host in {"0.0.0.0", "::"} else host
+    if address == "localhost":
+        address = "127.0.0.1"
+    endpoint = f"[{address}]:{port}" if ":" in address else f"{address}:{port}"
+    return address, endpoint
 
 
 def certificate_portal_url(api_host: str, portal_port: int, local_ip: str) -> str:

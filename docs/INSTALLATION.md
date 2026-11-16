@@ -68,6 +68,18 @@ La configuracion, certificados y simulaciones se guardan en `~/.moviu_printer/`.
 
 ## Primer inicio
 
+Si aún no hay una configuración, Moviu abre un asistente:
+
+1. Elige la plantilla **Odoo** o **ChePos**.
+2. Selecciona la impresora instalada en Windows para el puente USB. Si no aparece, instálala y pulsa **Actualizar impresoras**.
+3. Con Odoo, elige **Solo en este equipo** (predeterminado, sin API key) o **Compartir en la red local** (con API key) o **Compartir en la red local sin API key**. ChePos usa siempre este equipo sin clave y omite este paso.
+4. Revisa el resumen y pulsa **Finalizar**. El puente USB y el servidor se activan automáticamente y vuelven a iniciarse al abrir Moviu. Compartir también configura el firewall para la red local; Windows puede solicitar permisos de administrador. Si falla ese paso, la aplicación indica cómo reintentarlo.
+5. Instala la CA local en el equipo o los dispositivos que consumirán la API HTTPS.
+
+El asistente guarda la configuración al finalizar. Si sales antes, vuelve a aparecer en el próximo inicio. Actualizar una instalación existente conserva sus ajustes; puedes abrir el asistente desde **Configuración → Usar plantilla de configuración**.
+
+El puente ya está incluido en Moviu: no hay que instalar un programa adicional. Para impresoras de red o Linux, elige **Configuración manual** y sigue estos pasos:
+
 1. Configura el host y puerto de la impresora de red o selecciona una impresora local.
 2. Conserva el puerto API predeterminado `9000` o elige otro disponible.
 3. Elige el modo de acceso en **Conexión** según la tabla siguiente.
@@ -77,9 +89,10 @@ La configuracion, certificados y simulaciones se guardan en `~/.moviu_printer/`.
 
 | Modo de acceso | Configuración en Conexión | Dirección para el cliente | API key |
 |---|---|---|---|
-| Desde el mismo equipo, sin clave | Activa **Permitir impresión sin API key** | `https://127.0.0.1:9000` | Se omite |
+| Desde el mismo equipo, sin clave | Elige **Solo este equipo** y activa **Permitir impresión sin API key** | `https://127.0.0.1:9000` | Se omite |
 | Desde el mismo equipo, con clave | Desactiva la opción y configura **Host API** como `127.0.0.1` | `https://127.0.0.1:9000` | Obligatoria |
-| Desde otros dispositivos de la LAN | Desactiva la opción y configura **Host API** como `0.0.0.0` | `https://<IP-del-equipo-Moviu>:9000` | Obligatoria |
+| Desde otros dispositivos de la LAN, con clave | Elige **Red local** y desactiva la opción sin clave | `https://<IP-del-equipo-Moviu>:9000` | Obligatoria |
+| Desde otros dispositivos de la LAN, sin clave | Elige **Red local** y activa la opción sin clave | `https://<IP-del-equipo-Moviu>:9000` | Se omite |
 
 Los ejemplos usan el puerto predeterminado; reemplaza `9000` si configuraste otro. `0.0.0.0` es la dirección de escucha del servidor: los clientes de la LAN utilizan la IP real del equipo.
 
@@ -88,7 +101,7 @@ Los ejemplos usan el puerto predeterminado; reemplaza `9000` si configuraste otr
 Disponible desde **v1.5.0**.
 
 1. En **Conexión**, activa **Permitir impresión sin API key**. El cambio se guarda inmediatamente y reinicia los servicios activos.
-2. Moviu fija **Host API** en `127.0.0.1` y deshabilita **Habilitar acceso en la red local**. La API, el portal de certificados y el puente USB solo aceptan conexiones locales, y el servidor deja de anunciarse por mDNS.
+2. Elige **Solo este equipo** para usar `127.0.0.1`. La API, el portal de certificados y el puente USB solo aceptarán conexiones locales y Moviu no se anunciará por mDNS. Activar o desactivar la API key conserva el alcance elegido.
 3. Abre `http://127.0.0.1:9001/certificado` desde ese equipo e instala la CA siguiendo las instrucciones. HTTPS sigue siendo necesario aunque no se use clave.
 4. Envía los trabajos a `https://127.0.0.1:9000/api/print` sin el header `X-API-Key`.
 
@@ -100,7 +113,7 @@ El modo sin clave permite utilizar el puente USB integrado. Para una impresora U
 
 1. Abre **Puente USB**, activa **Habilitar puente** y selecciona la impresora instalada.
 2. Conserva el puerto `9100` o elige otro disponible, guarda la configuración y pulsa **Iniciar**.
-3. Con **Permitir impresión sin API key** activo, el puente escucha en `127.0.0.1:<puerto-del-puente>` y solo recibe comandos del mismo equipo.
+3. El puente sigue el alcance seleccionado en **Conexión**: `127.0.0.1:<puerto-del-puente>` en **Solo este equipo**, o `0.0.0.0:<puerto-del-puente>` en **Red local**.
 4. Envía trabajos a la API HTTPS sin `X-API-Key`. Si deseas dirigirlos explícitamente al puerto del puente, utiliza `"printer": {"host": "127.0.0.1", "port": 9100}` en el JSON, cambiando el puerto si corresponde.
 
 También puedes enviar bytes directamente al puerto TCP del puente desde un programa local; ese protocolo no utiliza API key. La API sigue en el puerto `9000` y el puente en `9100`: son servicios distintos.
@@ -131,10 +144,16 @@ Consulta también los [ejemplos de integración sin API key](API_INTEGRACION.md#
 
 ### Volver a recibir trabajos desde la LAN
 
-1. Desactiva **Permitir impresión sin API key**. Moviu vuelve a exigir la misma clave que tenía antes.
-2. Cambia **Host API** de `127.0.0.1` a `0.0.0.0` y guarda la configuración. Desactivar la opción conserva el host local hasta que lo cambies.
+Para configurar dos equipos desde el inicio, consulta [Imprimir desde otro equipo de la misma red](RED_LOCAL.md), disponible también como [guía ilustrada en PDF](Moviu_Impresion_en_Red_Local.pdf).
+
+1. Elige si usarás API key. Puedes desactivar **Permitir impresión sin API key** para exigir la clave existente o mantenerla activa para una red privada, controlada y segura.
+2. Selecciona **Red local** o configura **Host API** como `0.0.0.0`. Cambiar el alcance conserva tu elección de API key.
 3. Pulsa **Habilitar acceso en la red local** para configurar el firewall si hace falta.
-4. Instala la CA en cada dispositivo cliente desde `http://<IP-del-equipo-Moviu>:9001/certificado` y utiliza la URL HTTPS con `X-API-Key`.
+4. Instala la CA en cada dispositivo cliente desde `http://<IP-del-equipo-Moviu>:9001/certificado` y utiliza la URL HTTPS; envía `X-API-Key` solo si elegiste el modo con clave.
+
+## Modo fácil
+
+Las plantillas abren una vista con estado del servidor, un botón grande para iniciar o detener, la IP con botones para copiarla sola o con puerto y actividad reciente. **Modo avanzado** abre todas las herramientas existentes; **Modo fácil** permite volver. En **Configuración → Al abrir Moviu** se guarda la vista inicial. Al actualizar una instalación anterior se conserva el modo avanzado.
 
 ## Generar ejecutables
 
@@ -175,7 +194,7 @@ sudo dpkg -i dist/moviu-print-server.deb
 ## Seguridad local
 
 - Por defecto, la API exige `X-API-Key`, excepto el endpoint público de descubrimiento.
-- Con **Permitir impresión sin API key** activo, la API acepta trabajos únicamente desde el mismo equipo por loopback. El portal HTTP y el puente USB también quedan limitados al equipo local.
+- **Permitir impresión sin API key** funciona tanto en **Solo este equipo** como en **Red local**. Al activarlo se muestra una advertencia: se recomienda solo en redes privadas, controladas y seguras. El portal HTTP y el puente USB respetan el alcance seleccionado.
 - El portal HTTP de instalacion y la descarga de la CA son publicos; solo entregan el certificado publico y nunca la clave privada.
 - La clave se guarda en `~/.moviu_printer/config.json` y puede regenerarse desde la interfaz.
 - Moviu crea una CA local y certificados HTTPS en `~/.moviu_printer/`.
